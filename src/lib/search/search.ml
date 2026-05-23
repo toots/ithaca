@@ -1,0 +1,246 @@
+(* Ithaca - Audio fingerprinting
+ * Copyright (C) 2026 Romain Beauxis
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *)
+
+type search_params = {
+  frame_length : float;
+  frame_step : float;
+  buffer_size : int;
+  threshold : int;
+  debug : bool;
+}
+
+type result = Search_t.result = { start : float; stop : float; id : string }
+
+type search_match = {
+  match_start : int;
+  match_stop : int;
+  match_id : int;
+  match_offset : int;
+}
+
+let result_of_match ~params ~audio_params
+    { match_start; match_stop; match_id; match_offset = _ } =
+  let t_of_o ofs = float ofs *. audio_params.Audio.frame_step in
+  {
+    start = t_of_o match_start;
+    stop = t_of_o match_stop +. params.frame_length;
+    id = string_of_int match_id;
+  }
+
+type search_entry = Db.match_entry list
+type search = Hashes.hash list -> search_entry list
+
+let default_params =
+  {
+    frame_length = 5.0;
+    frame_step = 2.0;
+    buffer_size = 10;
+    threshold = 7;
+    debug = false;
+  }
+
+type hash_entry = { pos : int; hash : Hashes.hash }
+
+let frames ~params ~audio_params hashes =
+  let frame = ref [] in
+  let t_of_p pos = float pos *. audio_params.Audio.frame_step in
+  let p_of_t t = int_of_float (ceil (t /. audio_params.Audio.frame_step)) in
+  let start_pos = ref 0.0 in
+  let last_pos = ref 0.0 in
+  let size () = !last_pos -. !start_pos in
+  let advance () =
+    let cut = p_of_t (!start_pos +. params.frame_length) in
+    let ret = List.filter (fun { pos; _ } -> pos <= cut) !frame in
+    start_pos := !start_pos +. params.frame_step;
+    let start = p_of_t !start_pos in
+    frame := List.filter (fun { pos; _ } -> start < pos) !frame;
+    let min =
+      List.fold_left
+        (fun min { pos; _ } -> if pos < min then pos else min)
+        max_int ret
+    in
+    let positions = Hashtbl.create (List.length ret) in
+    let hashes =
+      List.fold_left
+        (fun hashes { pos; hash } ->
+          Hashtbl.add positions hash { Search_map.rel_pos = pos - min };
+          Hashes.HashSet.add hash hashes)
+        Hashes.HashSet.empty ret
+    in
+    Some { Search_map.ofs = min; hashes; positions }
+  in
+  let rec pull () =
+    match hashes () with
+    | Some { Hashes.pos; hash } ->
+        frame := { pos; hash } :: !frame;
+        last_pos := max !last_pos (t_of_p pos);
+        if params.frame_length <= size () then advance () else pull ()
+    | None -> if !frame <> [] then advance () else None
+  in
+  pull
+
+let best_match ~debug search_map frame =
+  match Search_map.search search_map frame with
+  | Some { Search_map.id; delta; count; offset } ->
+      if debug then
+        Printf.eprintf
+          "Best match: id: %d, delta: %d, offset: %d, count: %d\n%!" id delta
+          offset count;
+      Some
+        {
+          match_start = frame.Search_map.ofs;
+          match_stop = frame.Search_map.ofs;
+          match_id = id;
+          match_offset = offset;
+        }
+  | _ -> None
+
+exception Got_match
+
+type buffered_match = { mutable count : int; mutable mstop : int }
+
+let buffered_match ~params content =
+  let counts = Hashtbl.create params.buffer_size in
+  let keys = ref [] in
+  let key_of_match { match_id; match_offset; match_start; _ } =
+    (match_id, match_offset, match_start)
+  in
+  let match_of_key (match_id, match_offset, match_start) =
+    { match_id; match_offset; match_start; match_stop = match_start }
+  in
+  let add_match m =
+    keys := m :: !keys;
+    Hashtbl.add counts (key_of_match m) { count = 1; mstop = m.match_stop }
+  in
+  let count m = (Hashtbl.find counts (key_of_match m)).count in
+  let stop m = (Hashtbl.find counts (key_of_match m)).mstop in
+  let process_match m =
+    try
+      Hashtbl.iter
+        (fun k c ->
+          let m' = match_of_key k in
+          if m.match_id = m'.match_id then begin
+            c.count <- c.count + 1;
+            c.mstop <- m.match_stop;
+            raise Got_match
+          end)
+        counts;
+      add_match m
+    with Got_match -> ()
+  in
+  for i = 0 to params.buffer_size - 1 do
+    match Ringbuffer.get content i with None -> () | Some m -> process_match m
+  done;
+  List.fold_left
+    (fun cur m ->
+      match (m, cur) with
+      | m, _ when count m < params.threshold -> cur
+      | m, Some m' when count m' < count m ->
+          Some { m with match_stop = stop m }
+      | m, None -> Some { m with match_stop = stop m }
+      | _ -> cur)
+    None !keys
+
+let consolidate matches =
+  let h = Hashtbl.create 1024 in
+  let process { start; stop; id } =
+    if Hashtbl.mem h id then begin
+      let m = Hashtbl.find h id in
+      let m, rem =
+        List.partition
+          (fun (start', stop') ->
+            (*            start             stop
+             *              |-----------------|
+             *   |------------------|
+             * start'              stop'
+             *
+             * But, also:
+             *        start    stop
+             *          |-------|
+             *   |------------------|
+             * start'              stop' *)
+            (start' <= start && start <= stop')
+            || (start <= start' && start' <= stop))
+          m
+      in
+      let start =
+        List.fold_left (fun start (start', _) -> min start start') start m
+      in
+      let stop =
+        List.fold_left (fun stop (_, stop') -> max stop stop') stop m
+      in
+      Hashtbl.replace h id ([ (start, stop) ] @ rem)
+    end
+    else Hashtbl.add h id [ (start, stop) ]
+  in
+  List.iter process matches;
+  let matches =
+    Hashtbl.fold
+      (fun id positions cur ->
+        cur @ List.map (fun (start, stop) -> { id; start; stop }) positions)
+      h []
+  in
+  let compare m m' = compare m.start m'.start in
+  List.sort compare matches
+
+exception Found of int
+
+let search_hashes ?(params = default_params) ~search ~audio_params hashes =
+  let debug = params.debug in
+  let is_done = ref false in
+  let hashes () =
+    match hashes () with
+    | None ->
+        is_done := true;
+        None
+    | h -> h
+  in
+  let search_map = Search_map.init search in
+  let frames = frames ~params ~audio_params hashes in
+  let matches _ =
+    match frames () with
+    | Some frame -> best_match ~debug search_map frame
+    | None -> None
+  in
+  let initial_frames = Array.init params.buffer_size matches in
+  let buffer = Ringbuffer.init initial_frames in
+  let results = ref [] in
+  let matches () =
+    let ret = buffered_match ~params buffer in
+    Ringbuffer.push buffer (matches ());
+    ret
+  in
+  let is_matching = ref false in
+  let append_match m =
+    match !results with
+    | m' :: tail when !is_matching && m.match_id = m'.match_id ->
+        results := { m' with match_stop = m.match_stop } :: tail
+    | _ -> results := m :: !results
+  in
+  let rec pull () =
+    match matches () with
+    | Some m ->
+        append_match m;
+        is_matching := true;
+        pull ()
+    | None when not !is_done ->
+        is_matching := false;
+        pull ()
+    | None ->
+        List.rev (List.map (result_of_match ~params ~audio_params) !results)
+  in
+  consolidate (pull ())

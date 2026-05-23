@@ -1,0 +1,29 @@
+(test
+ (name runner)
+ (libraries
+  ithaca_atd
+  ithaca_utils
+  ithaca_fcqt
+  ithaca_audio
+  ithaca_db
+  ithaca_search
+  ithaca_lmdb
+  ithaca_args
+  ounit2
+  unix))
+
+(executable
+ (name fcqt_shift)
+ (libraries ithaca_utils ithaca_fcqt samplerate))
+
+(rule
+ (target paths.ml)
+ (deps %{exe:../bin/ithaca.exe} %{exe:../bin/pitch_shift.exe})
+ (action
+  (write-file
+   %{target}
+   "let _build_default = Filename.dirname (Filename.dirname Sys.executable_name)\nlet ithaca = Filename.concat _build_default \"bin/ithaca.exe\"\nlet pitch_shift = Filename.concat _build_default \"bin/pitch_shift.exe\"\n")))
+
+(executable
+ (name integration_test)
+ (libraries ithaca_atd ithaca_integration unix threads.posix))

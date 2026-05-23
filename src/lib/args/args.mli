@@ -1,0 +1,39 @@
+(* Ithaca - Audio fingerprinting
+ * Copyright (C) 2026 Romain Beauxis
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ *)
+
+type arg = Arg.key * Arg.spec * Arg.doc
+
+val parse :
+  ?allow_anon:bool ->
+  args:(Arg.key * Arg.spec * Arg.doc) list ->
+  Arg.usage_msg ->
+  unit
+
+val anonymous_args : unit -> string list
+val profile_arg : arg
+val b1_divisor_arg : arg
+val reassign_arg : arg
+val whitening_time_arg : arg
+val base64_profile : unit -> string
+val set_base64_profile : string -> unit
+val json_profile : unit -> string
+val audio_params : unit -> Audio.audio_params
+val merger : unit -> Audio.channel_merger
+val store_arg : arg
+val lmdb_operations : unit -> Db.operations
+val db_params : unit -> Db.params
+val search_params : unit -> Search.search_params

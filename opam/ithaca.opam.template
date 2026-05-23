@@ -1,0 +1,5 @@
+depexts: [
+  ["liblmdb-dev"] {os-family = "debian"}
+  ["lmdb-devel"] {os-family = "fedora"}
+  ["lmdb"] {os = "macos"}
+]

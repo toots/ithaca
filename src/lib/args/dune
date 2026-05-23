@@ -1,0 +1,10 @@
+(library
+ (name ithaca_args)
+ (wrapped false)
+ (libraries
+  ithaca_atd
+  ithaca_audio
+  ithaca_db
+  ithaca_search
+  ithaca_lmdb
+  cryptokit))

@@ -1,0 +1,19 @@
+(library
+ (name ithaca_utils)
+ (wrapped false)
+ (libraries ithaca_atd unix)
+ (foreign_stubs
+  (language c)
+  (names wav_c)
+  (flags
+   (:standard -fPIC -O3))))
+
+(rule
+ (alias fmt)
+ (deps wav_c.c)
+ (action
+  (progn
+   (with-stdout-to
+    wav_c.c.formatted
+    (run clang-format wav_c.c))
+   (diff wav_c.c wav_c.c.formatted))))

@@ -1,0 +1,20 @@
+(library
+ (name ithaca_lmdb)
+ (wrapped false)
+ (libraries ithaca_atd ithaca_db)
+ (foreign_stubs
+  (language c)
+  (names lmdb_stubs)
+  (flags
+   (:standard -fPIC -O3)))
+ (c_library_flags (-llmdb)))
+
+(rule
+ (alias fmt)
+ (deps lmdb_stubs.c)
+ (action
+  (progn
+   (with-stdout-to
+    lmdb_stubs.c.formatted
+    (run clang-format lmdb_stubs.c))
+   (diff lmdb_stubs.c lmdb_stubs.c.formatted))))

@@ -1,0 +1,4 @@
+(library
+ (name ithaca_db)
+ (wrapped false)
+ (libraries ithaca_audio))

@@ -1,0 +1,4 @@
+(library
+ (name ithaca_fcqt)
+ (wrapped false)
+ (libraries ithaca_utils fftw3))

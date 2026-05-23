@@ -1,0 +1,23 @@
+(executables
+ (names ithaca ithaca_json_store ithaca_distributed)
+ (public_names ithaca ithaca_json_store ithaca_distributed)
+ (libraries
+  ithaca_atd
+  ithaca_utils
+  ithaca_audio
+  ithaca_db
+  ithaca_search
+  ithaca_lmdb
+  ithaca_json
+  ithaca_args
+  unix))
+
+(executable
+ (name visualize)
+ (optional)
+ (libraries ithaca_args ithaca_audio ithaca_utils ithaca_lmdb imagelib.unix))
+
+(executable
+ (name pitch_shift)
+ (optional)
+ (libraries ithaca_utils soundtouch))

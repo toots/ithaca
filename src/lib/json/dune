@@ -1,0 +1,4 @@
+(library
+ (name ithaca_json)
+ (wrapped false)
+ (libraries ithaca_atd ithaca_db ithaca_args))
