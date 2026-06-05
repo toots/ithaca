@@ -10,6 +10,7 @@
 
 (rule
  (alias fmt)
+ (enabled_if %{bin-available:clang-format})
  (deps wav_c.c)
  (action
   (progn
