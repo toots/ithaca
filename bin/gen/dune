@@ -1,0 +1,21 @@
+(executable
+ (name gen_visualize)
+ (modules gen_visualize))
+
+(executable
+ (name gen_pitch_shift)
+ (modules gen_pitch_shift))
+
+(rule
+ (target visualize.inc)
+ (action
+  (with-stdout-to
+   visualize.inc
+   (run ./gen_visualize.exe %{lib-available:imagelib}))))
+
+(rule
+ (target pitch_shift.inc)
+ (action
+  (with-stdout-to
+   pitch_shift.inc
+   (run ./gen_pitch_shift.exe %{lib-available:soundtouch}))))

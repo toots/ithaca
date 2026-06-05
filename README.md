@@ -11,7 +11,7 @@ OCaml implementation of a scalable audio fingerprinting method with robustness t
 The `visualize` tool (optional, requires `imagelib`) renders a CQT spectrogram of a WAV file with detected peaks (white dots) and hash pairs (green lines) overlaid:
 
 ```
-dune exec bin/visualize.exe -- input.wav output.png
+dune exec bin/optionals/visualize.exe -- input.wav output.png
 ```
 
 ![CQT spectrogram with peaks and hash pairs](reference/viz.png)

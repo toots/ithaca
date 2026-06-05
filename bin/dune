@@ -11,13 +11,3 @@
   ithaca_json
   ithaca_args
   unix))
-
-(executable
- (name visualize)
- (optional)
- (libraries ithaca_args ithaca_audio ithaca_utils ithaca_lmdb imagelib.unix))
-
-(executable
- (name pitch_shift)
- (optional)
- (libraries ithaca_utils soundtouch))
