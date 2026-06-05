@@ -163,6 +163,28 @@ let hash ?(b1_divisor = 6) (x1, y1) (x2, y2) =
        (Char.code digest.[2])
        (Char.code digest.[3]))
 
+let merge h1 h2 =
+  let next1 = ref (h1 ()) in
+  let next2 = ref (h2 ()) in
+  fun () ->
+    match (!next1, !next2) with
+    | None, None -> None
+    | Some h, None ->
+        next1 := h1 ();
+        Some h
+    | None, Some h ->
+        next2 := h2 ();
+        Some h
+    | Some h1_h, Some h2_h ->
+        if h1_h.pos <= h2_h.pos then begin
+          next1 := h1 ();
+          Some h1_h
+        end
+        else begin
+          next2 := h2 ();
+          Some h2_h
+        end
+
 let hashes ?(b1_divisor = 6) pairs =
   let queue = Queue.create () in
   fun () ->

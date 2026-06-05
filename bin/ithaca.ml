@@ -94,7 +94,7 @@ let print_time t =
 
 let get_hashes () =
   let params = Args.audio_params () in
-  let hash merger =
+  let open_wav merger =
     let wav = Wav.fopen !input_filename in
     let hash = Audio.hash_wav ~merger ~params wav in
     fun () ->
@@ -104,7 +104,19 @@ let get_hashes () =
           Wav.close wav;
           None
   in
-  let hashes = hash (Args.merger ()) in
+  let hashes =
+    match Args.merger () with
+    | Audio.Single merger -> open_wav merger
+    | Audio.Both ->
+        let wav = Wav.fopen !input_filename in
+        let is_mono = Wav.channels wav = 1 in
+        Wav.close wav;
+        if is_mono then open_wav Audio.mono_merger
+        else
+          Hashes.merge
+            (open_wav Audio.mono_merger)
+            (open_wav Audio.center_merger)
+  in
   if !quiet then hashes
   else begin
     let total_hashes = ref 0 in

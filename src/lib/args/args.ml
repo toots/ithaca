@@ -42,8 +42,9 @@ type profile = Profile_t.profile = {
 }
 
 let merger_of_string = function
-  | "mono" -> Audio.mono_merger
-  | "center" -> Audio.center_merger
+  | "mono" -> Audio.Single Audio.mono_merger
+  | "center" -> Audio.Single Audio.center_merger
+  | "both" -> Audio.Both
   | _ -> failwith "Invalid merger!"
 
 let profile =
@@ -60,7 +61,7 @@ let profile =
       delta_y = Audio.default_params.Audio.peaks_delta_y;
       max_x = Audio.default_params.Audio.pairs_max_x;
       max_y = Audio.default_params.Audio.pairs_max_y;
-      merger = "center";
+      merger = "both";
       max_hash_id = 512;
       max_hash_pos = 25;
       saturate = true;
@@ -201,7 +202,7 @@ let audio_params () =
     hashes_whitening_time = !profile.whitening_time;
   }
 
-let merger () = merger_of_string !profile.merger
+let merger () : Audio.merger_mode = merger_of_string !profile.merger
 
 let lmdb_operations () =
   let ops = Lmdb_store.operations !lmdb_path in

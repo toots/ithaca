@@ -115,11 +115,18 @@ let make_storage fn =
 
 let hashes_of_wav ~audio_params filename header =
   let header = Wav_j.header_of_string header in
-  let ic = open_in_bin filename in
   let length = (Unix.stat filename).Unix.st_size in
-  let wav = Wav.from_raw ~header ~length ic in
-  let merger = Args.merger () in
-  Audio.hash_wav ~merger ~params:audio_params wav
+  let open_wav merger =
+    let ic = open_in_bin filename in
+    Audio.hash_wav ~merger ~params:audio_params
+      (Wav.from_raw ~header ~length ic)
+  in
+  match Args.merger () with
+  | Audio.Single merger -> open_wav merger
+  | Audio.Both ->
+      if header.Wav_t.channels = 1 then open_wav Audio.mono_merger
+      else
+        Hashes.merge (open_wav Audio.mono_merger) (open_wav Audio.center_merger)
 
 let hash () =
   if !header = "" || !filename = "" then begin

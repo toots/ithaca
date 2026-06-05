@@ -16,6 +16,7 @@
  *)
 
 type channel_merger = float array array -> float array
+type merger_mode = Single of channel_merger | Both
 
 val mono_merger : channel_merger
 val center_merger : channel_merger

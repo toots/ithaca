@@ -93,9 +93,13 @@ let () =
     }
   in
 
+  let merger =
+    match Args.merger () with
+    | Audio.Single m -> m
+    | Audio.Both -> Audio.center_merger
+  in
   let stream =
-    Audio.hash_wav ~instruments ~merger:(Args.merger ())
-      ~params:(Args.audio_params ()) wav
+    Audio.hash_wav ~instruments ~merger ~params:(Args.audio_params ()) wav
   in
   let rec drain () = match stream () with Some _ -> drain () | None -> () in
   drain ();

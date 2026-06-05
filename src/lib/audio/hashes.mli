@@ -42,3 +42,6 @@ val pairs :
 (* Hash function: encodes b̂1=⌊y1/b1_divisor⌋, Δbin, and Δtime. *)
 val hash : ?b1_divisor:int -> peak -> peak -> hash
 val hashes : ?b1_divisor:int -> (peak * peak) list IStream.t -> t
+
+(* Merge two hash streams into one, interleaved by position. *)
+val merge : t -> t -> t

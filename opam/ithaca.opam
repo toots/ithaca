@@ -6,7 +6,7 @@ description:
 license: "GPL-3.0-or-later"
 depends: [
   "ocaml" {>= "4.14"}
-  "dune" {>= "3.22"}
+  "dune" {>= "3.22" & >= "3.22"}
   "atdgen" {build}
   "atdgen-runtime"
   "cryptokit"

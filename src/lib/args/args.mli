@@ -32,7 +32,7 @@ val base64_profile : unit -> string
 val set_base64_profile : string -> unit
 val json_profile : unit -> string
 val audio_params : unit -> Audio.audio_params
-val merger : unit -> Audio.channel_merger
+val merger : unit -> Audio.merger_mode
 val store_arg : arg
 val lmdb_operations : unit -> Db.operations
 val db_params : unit -> Db.params

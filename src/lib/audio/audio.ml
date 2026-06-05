@@ -16,6 +16,7 @@
  *)
 
 type channel_merger = float array array -> float array
+type merger_mode = Single of channel_merger | Both
 
 let mono_merger chunk =
   let length = Array.length chunk.(0) in
