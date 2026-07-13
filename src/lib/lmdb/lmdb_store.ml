@@ -30,54 +30,49 @@ type t
 type values = Db.data array
 
 external connect : string -> t = "ocaml_lmdb_open"
-external close : t -> unit = "ocaml_lmdb_close"
 external lmdb_put_profile : t -> string -> unit = "ocaml_lmdb_put_profile"
 external lmdb_get_profile : t -> string = "ocaml_lmdb_get_profile"
-
-external lmdb_put : t -> int -> (int * values) array -> unit
-  = "ocaml_lmdb_put"
-
-let wrap ?(must_exist = true) path f arg =
-  if (not (Sys.file_exists path)) && must_exist then
-    failwith (Printf.sprintf "Ithaca LMDB database does not exist: %s" path);
-  let env = connect path in
-  try
-    let ret = f env arg in
-    close env;
-    ret
-  with e ->
-    close env;
-    raise e
-
-let put_profile path =
-  wrap ~must_exist:false path (fun env profile ->
-      let profile = Profile_b.string_of_profile profile in
-      begin try
-        if profile <> lmdb_get_profile env then raise Inconsistent_profile
-      with Not_found -> ()
-      end;
-      lmdb_put_profile env profile)
-
-let get_profile path =
-  wrap path
-    (fun env () ->
-      let profile = lmdb_get_profile env in
-      Profile_b.profile_of_string profile)
-    ()
-
-let put path max =
-  wrap ~must_exist:false path (fun env hashes ->
-      let hashes =
-        Array.of_list
-          (List.map (fun (hash, values) -> (hash, Array.of_list values)) hashes)
-      in
-      lmdb_put env max hashes)
-
+external lmdb_put : t -> int -> (int * values) array -> unit = "ocaml_lmdb_put"
 external lmdb_get : t -> int array -> values array = "ocaml_lmdb_get"
 
-let get path =
-  wrap path (fun env hashes ->
-      List.map Array.to_list
-        (Array.to_list (lmdb_get env (Array.of_list hashes))))
+(* Environments are opened once per path and kept for the lifetime of the
+   process: the custom block finalizer closes them. Opening the same LMDB
+   file twice within one process is unsafe, hence the shared table. *)
+let envs : (string, t) Hashtbl.t = Hashtbl.create 4
+let envs_mutex = Mutex.create ()
+
+let env_for ?(must_exist = true) path =
+  Mutex.protect envs_mutex (fun () ->
+      match Hashtbl.find_opt envs path with
+      | Some env -> env
+      | None ->
+          if must_exist && not (Sys.file_exists path) then
+            failwith
+              (Printf.sprintf "Ithaca LMDB database does not exist: %s" path);
+          let env = connect path in
+          Hashtbl.add envs path env;
+          env)
+
+let put_profile path profile =
+  let env = env_for ~must_exist:false path in
+  let profile = Profile_b.string_of_profile profile in
+  begin try if profile <> lmdb_get_profile env then raise Inconsistent_profile
+  with Not_found -> ()
+  end;
+  lmdb_put_profile env profile
+
+let get_profile path =
+  Profile_b.profile_of_string (lmdb_get_profile (env_for path))
+
+let put path max hashes =
+  let hashes =
+    Array.of_list
+      (List.map (fun (hash, values) -> (hash, Array.of_list values)) hashes)
+  in
+  lmdb_put (env_for ~must_exist:false path) max hashes
+
+let get path hashes =
+  List.map Array.to_list
+    (Array.to_list (lmdb_get (env_for path) (Array.of_list hashes)))
 
 let operations path = { Db.put = put path; get = get path }
