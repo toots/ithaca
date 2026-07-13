@@ -149,8 +149,8 @@ let scheme_arg =
         ignore (scheme_of_string s);
         profile := { !profile with Profile_t.scheme = s }),
     "Hashing scheme, one of: \"pairs\" (peak pairs, Fenet et al. 2011) or \
-     \"quads\" (peak quads, Sonnleitner & Widmer 2016, robust to larger \
-     pitch shifts). Default: \"pairs\"." )
+     \"quads\" (peak quads, Sonnleitner & Widmer 2016, robust to larger pitch \
+     shifts). Default: \"pairs\"." )
 
 let whitening_time_arg =
   ( "-whitening-time",

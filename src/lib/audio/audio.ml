@@ -183,12 +183,23 @@ let hash_wav ?(instruments = default_instruments) ?(merger = mono_merger)
                  frame)
   in
   let delta_x = int_of_float (params.peaks_delta_x /. params.frame_step) in
-  let peaks = Hashes.peaks ~delta_x ~delta_y:params.peaks_delta_y rows in
-  let peaks = may_apply peaks instruments.peaks in
   let max_x = int_of_float (params.pairs_max_x /. params.frame_step) in
   match params.hashes_scheme with
-  | Quads -> Quads.hashes ~probes ~max_x ~max_y:params.pairs_max_y peaks
+  | Quads ->
+      (* Quads need 4 co-surviving peaks per hash where pairs need 2, so
+         they only work with a denser constellation: halve the peak
+         suppression radius. *)
+      let peaks =
+        Hashes.peaks
+          ~delta_x:(max 1 (delta_x / 2))
+          ~delta_y:(max 1 (params.peaks_delta_y / 2))
+          rows
+      in
+      let peaks = may_apply peaks instruments.peaks in
+      Quads.hashes ~probes ~max_x ~max_y:params.pairs_max_y peaks
   | Pairs ->
+      let peaks = Hashes.peaks ~delta_x ~delta_y:params.peaks_delta_y rows in
+      let peaks = may_apply peaks instruments.peaks in
       let pairs =
         Hashes.pairs ~delta_x ~delta_y:params.peaks_delta_y ~max_x
           ~max_y:params.pairs_max_y peaks

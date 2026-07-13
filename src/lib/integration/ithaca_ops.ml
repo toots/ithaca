@@ -15,8 +15,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *)
 
-let index_file ~ithaca_bin ~b1_divisor ~reassign ~scheme ~on_stage db_path
-    file id =
+let index_file ~ithaca_bin ~b1_divisor ~reassign ~scheme ~on_stage db_path file
+    id =
   let wav = Filename.temp_file "ithaca_idx" ".wav" in
   let opt_int name = function
     | None -> ""

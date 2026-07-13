@@ -4,7 +4,17 @@ OCaml implementation of a scalable audio fingerprinting method with robustness t
 
 ## References
 
-- [A Scalable Audio Fingerprint Method with Robustness to Pitch-Shifting](reference/Ismir'11.pdf) (S. Fenet et al., ISMIR 2011) — fingerprinting algorithm
+- [A Scalable Audio Fingerprint Method with Robustness to Pitch-Shifting](reference/Ismir'11.pdf) (S. Fenet et al., ISMIR 2011) — `pairs` fingerprinting scheme (default)
+- [Robust Quad-Based Audio Fingerprinting](https://doi.org/10.1109/TASLP.2015.2509248) (R. Sonnleitner, G. Widmer, IEEE/ACM TASLP 2016) — `quads` fingerprinting scheme
+
+## Hashing schemes
+
+Two hashing schemes are available, selected at indexing time with `-scheme` (stored in the database profile, so searches automatically use the right one):
+
+- **pairs** (default) — peak pairs after Fenet et al. Fast and compact; tolerates pitch shifts up to roughly ±1 semitone (tunable via `-b1-divisor`).
+- **quads** — peak quads after Sonnleitner & Widmer. Four peaks are normalized into the unit box spanned by the outer two, which makes the hash invariant to pitch shifting of any magnitude on the CQT's log-frequency axis. Denser and slower than pairs, but identifies material shifted well beyond a semitone and recovers the shift accurately.
+
+Search results include a `pitch_semitones` field (text, CSV and JSON output) with the estimated pitch offset of the query relative to the indexed audio: `+2.0` means the query is pitched up by 2 semitones. With `quads` the estimate is accurate across large shifts; with `pairs` it is approximate and only available within the scheme's tolerance band.
 
 ## Visualization
 
@@ -101,6 +111,7 @@ Options:
 - `--max-duration SECS` — skip files longer than this (default: 1200)
 - `--max-files N` — index at most N files (default: no limit; useful for quick experiments)
 - `--b1-divisor D` — hash granularity: `b̂₁ = ⌊b1/D⌋`. Larger D gives more pitch-shift tolerance at the cost of more hash collisions (default: ithaca's default, currently 6)
+- `--scheme NAME` — hashing scheme: `pairs` (default) or `quads` (see [Hashing schemes](#hashing-schemes))
 - `--reassign` — enable frequency reassignment for sharper peak positions (~6× slower)
 - `--jobs N` — parallel workers (default: number of CPU cores)
 

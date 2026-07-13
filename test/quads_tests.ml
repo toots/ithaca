@@ -3,12 +3,7 @@ open OUnit2
 (* A small constellation: anchor (0, 10), far corner (30, 40), and two
    interior peaks. Emitted row by row like the peaks stream does. *)
 let constellation dy =
-  [
-    [ (0, 10 + dy) ];
-    [ (8, 20 + dy) ];
-    [ (15, 30 + dy) ];
-    [ (30, 40 + dy) ];
-  ]
+  [ [ (0, 10 + dy) ]; [ (8, 20 + dy) ]; [ (15, 30 + dy) ]; [ (30, 40 + dy) ] ]
 
 let pull_hashes ?probes rows =
   IStream.pull (Quads.hashes ?probes ~max_x:40 ~max_y:64 (IStream.make rows))
@@ -30,14 +25,17 @@ let suite =
     ( "Quad hash discriminates interior geometry" >:: fun _ ->
       let reference = pull_hashes (constellation 0) in
       let different =
-        pull_hashes
-          [ [ (0, 10) ]; [ (8, 36) ]; [ (15, 12) ]; [ (30, 40) ] ]
+        pull_hashes [ [ (0, 10) ]; [ (8, 36) ]; [ (15, 12) ]; [ (30, 40) ] ]
       in
       assert_bool "different geometry, different hashes"
         (List.map (fun { Hashes.hash; _ } -> hash) reference
         <> List.map (fun { Hashes.hash; _ } -> hash) different) );
     ( "Probes include the exact hash" >:: fun _ ->
-      let exact = List.map (fun { Hashes.hash; _ } -> hash) (pull_hashes (constellation 0)) in
+      let exact =
+        List.map
+          (fun { Hashes.hash; _ } -> hash)
+          (pull_hashes (constellation 0))
+      in
       let probed =
         List.map
           (fun { Hashes.hash; _ } -> hash)

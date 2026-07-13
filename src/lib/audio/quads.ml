@@ -35,7 +35,7 @@
    bins: very small boxes make the normalized coordinates unstable, since
    integer peak jitter is divided by the box span. *)
 let min_dx_divisor = 8
-let min_dy = 8
+let min_dy = 4
 
 (* Number of interior peaks considered per (A, B) box: all C(k, 2) pairs
    are emitted so a single missing peak on the query side does not lose
@@ -43,7 +43,7 @@ let min_dy = 8
 let max_interior = 4
 
 (* Maximum quads emitted per incoming peak, to bound hash density. *)
-let max_quads_per_peak = 16
+let max_quads_per_peak = 32
 
 (* Quantization: [bits] per component, so a cell is 1/2^bits of the box
    span. Coarse on purpose: whitening-state differences between the query
@@ -63,8 +63,7 @@ let pack q1 q2 q3 q4 =
   (((((q1 lsl bits) lor q2) lsl bits) lor q3) lsl bits) lor q4
 
 let normalize (ax, ay) (bx, by) (px, py) =
-  ( float (px - ax) /. float (bx - ax),
-    float (py - ay) /. float (by - ay) )
+  (float (px - ax) /. float (bx - ax), float (py - ay) /. float (by - ay))
 
 let hash a b c d =
   let cx, cy = normalize a b c in
