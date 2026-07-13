@@ -17,27 +17,36 @@
 
 module FFT = Fftw3.D
 
-let execute_fft input output elem_type plan data =
-  let data = FFT.Array1.of_array elem_type Bigarray.c_layout data in
-  Bigarray.Array1.blit data input;
-  FFT.exec plan;
-  Array.init (Bigarray.Array1.dim output) (Bigarray.Array1.get output)
-
 let fft_c2r size =
   let input =
     FFT.Array1.create FFT.complex Bigarray.c_layout ((size / 2) + 1)
   in
   let output = FFT.Array1.create FFT.float Bigarray.c_layout size in
   let plan = FFT.Array1.c2r input output in
-  execute_fft input output FFT.complex plan
+  fun data ->
+    let data = FFT.Array1.of_array FFT.complex Bigarray.c_layout data in
+    Bigarray.Array1.blit data input;
+    FFT.exec plan;
+    Array.init (Bigarray.Array1.dim output) (Bigarray.Array1.get output)
 
-let fft_r2c size =
+(* Forward FFT filling the caller-provided [re]/[im] half-spectrum buffers,
+   reused across frames to avoid per-frame allocation. *)
+let fft_r2c size re im =
   let input = FFT.Array1.create FFT.float Bigarray.c_layout size in
   let output =
     FFT.Array1.create FFT.complex Bigarray.c_layout ((size / 2) + 1)
   in
   let plan = FFT.Array1.r2c input output in
-  execute_fft input output FFT.float plan
+  fun data ->
+    for i = 0 to size - 1 do
+      Bigarray.Array1.unsafe_set input i (Array.unsafe_get data i)
+    done;
+    FFT.exec plan;
+    for i = 0 to size / 2 do
+      let { Complex.re = r; im = c } = Bigarray.Array1.unsafe_get output i in
+      Array.unsafe_set re i r;
+      Array.unsafe_set im i c
+    done
 
 type params = {
   min_freq : float;
@@ -50,15 +59,23 @@ type params = {
 
 type frame = Complex.t array
 
+(* Sparse kernel row: [k_idx] holds half-spectrum indices (spectrum indices
+   above fft_size/2 are already resolved to their mirrored position), [k_re]
+   the coefficient and [k_im] the coefficient with the conjugation sign
+   folded in. *)
+type kernel = { k_idx : int array; k_re : float array; k_im : float array }
+
 type t = {
   params : params;
-  matrix : (int, (int * float) list) Hashtbl.t;
-  t_matrix : (int, (int * float) list) Hashtbl.t;
-  f_matrix : (int, (int * float) list) Hashtbl.t;
+  matrix : kernel array;
+  t_matrix : kernel array;
+  f_matrix : kernel array;
   cached_steps : int;
   deferred : float array Ringbuffer.t;
   f_of_pos : float array;
-  fft : float array -> Complex.t array;
+  fft : float array -> unit;
+  fft_re : float array;
+  fft_im : float array;
   ifft : Complex.t array -> float array;
   cqt_size : int;
   fft_size : int;
@@ -95,19 +112,26 @@ let init params =
       else Complex.zero
     in
     let fft = fft_c2r n_max in
-    let matrix = Hashtbl.create 12 in
-    Array.iter
-      (fun k ->
+    Array.init big_k (fun k ->
         let row = Array.init ((n_max / 2) + 1) (big_h (float k)) in
         let fft_row = fft row in
         let kernel_elems =
           List.filter
-            (fun (n, v) -> threshold < abs_float v)
+            (fun (_, v) -> threshold < abs_float v)
             (Array.to_list (Array.mapi (fun n v -> (n, v)) fft_row))
         in
-        if 0 < List.length kernel_elems then Hashtbl.add matrix k kernel_elems)
-      (Array.init big_k (fun x -> x));
-    matrix
+        let count = List.length kernel_elems in
+        let k_idx = Array.make count 0 in
+        let k_re = Array.make count 0. in
+        let k_im = Array.make count 0. in
+        List.iteri
+          (fun j (n, v) ->
+            let conj = n > n_max / 2 in
+            k_idx.(j) <- (if conj then n_max - n - 1 else n);
+            k_re.(j) <- v;
+            k_im.(j) <- (if conj then -.v else v))
+          kernel_elems;
+        { k_idx; k_re; k_im })
   in
   let hamming n len =
     (25.0 /. 46.0) -. (21.0 /. 46.0 *. cos (2.0 *. pi *. n /. len))
@@ -119,9 +143,11 @@ let init params =
   let matrix = make_matrix hamming in
   let t_matrix, f_matrix =
     if params.reassign then (make_matrix t_window, make_matrix f_window)
-    else (Hashtbl.create 0, Hashtbl.create 0)
+    else ([||], [||])
   in
-  let fft = fft_r2c n_max in
+  let fft_re = Array.make ((n_max / 2) + 1) 0. in
+  let fft_im = Array.make ((n_max / 2) + 1) 0. in
+  let fft = fft_r2c n_max fft_re fft_im in
   let ifft = fft_c2r n_max in
   let f_of_pos = Array.init big_k (fun k -> big_q /. big_n (float k)) in
   let cached_steps =
@@ -137,6 +163,8 @@ let init params =
       Ringbuffer.init (Array.init cached_steps (fun _ -> Array.make big_k 0.));
     f_of_pos;
     fft;
+    fft_re;
+    fft_im;
     ifft;
     cqt_size = big_k;
     fft_size = n_max;
@@ -185,24 +213,26 @@ let reassign ~fcqt ~t_data ~f_data data =
   end;
   ret
 
-let transform_matrix fcqt fft_data matrix =
+(* Apply a sparse kernel matrix to the current content of the shared
+   [fft_re]/[fft_im] buffers. *)
+let transform_matrix fcqt matrix =
+  let fft_re = fcqt.fft_re in
+  let fft_im = fcqt.fft_im in
   Array.init fcqt.cqt_size (fun k ->
-      match Hashtbl.find_opt matrix k with
-      | None -> Complex.zero
-      | Some row ->
-          List.fold_left
-            (fun cur (n, v) ->
-              let { Complex.re; im } =
-                (* See: http://www.fftw.org/fftw3_doc/The-1d-Real_002ddata-DFT.html#The-1d-Real_002ddata-DFT *)
-                if n <= fcqt.fft_size / 2 then fft_data.(n)
-                else Complex.conj fft_data.(fcqt.fft_size - n - 1)
-              in
-              Complex.add cur (complex (v *. re) (v *. im)))
-            Complex.zero row)
+      let { k_idx; k_re; k_im } = matrix.(k) in
+      let re = ref 0. in
+      let im = ref 0. in
+      for j = 0 to Array.length k_idx - 1 do
+        let m = Array.unsafe_get k_idx j in
+        re := !re +. (Array.unsafe_get k_re j *. Array.unsafe_get fft_re m);
+        im := !im +. (Array.unsafe_get k_im j *. Array.unsafe_get fft_im m)
+      done;
+      complex !re !im)
 
 let execute_frame fcqt data =
   if Array.length data <> fcqt.fft_size then failwith "Invalid input size!";
-  transform_matrix fcqt (fcqt.fft data) fcqt.matrix
+  fcqt.fft data;
+  transform_matrix fcqt fcqt.matrix
 
 let frame_magnitude frame = Array.map (fun c -> log1p (Complex.norm c)) frame
 
@@ -210,33 +240,29 @@ let invert_frame fcqt frame =
   let freq_buf = Array.make ((fcqt.fft_size / 2) + 1) Complex.zero in
   Array.iteri
     (fun k coeff ->
-      match Hashtbl.find_opt fcqt.matrix k with
-      | None -> ()
-      | Some row ->
-          List.iter
-            (fun (n, v) ->
-              let idx =
-                if n <= fcqt.fft_size / 2 then n else fcqt.fft_size - n - 1
-              in
-              freq_buf.(idx) <-
-                Complex.add freq_buf.(idx)
-                  {
-                    Complex.re = v *. coeff.Complex.re;
-                    Complex.im = v *. coeff.Complex.im;
-                  })
-            row)
+      let { k_idx; k_re; _ } = fcqt.matrix.(k) in
+      Array.iteri
+        (fun j idx ->
+          let v = k_re.(j) in
+          freq_buf.(idx) <-
+            Complex.add freq_buf.(idx)
+              {
+                Complex.re = v *. coeff.Complex.re;
+                Complex.im = v *. coeff.Complex.im;
+              })
+        k_idx)
     frame;
   fcqt.ifft freq_buf
 
 let execute fcqt data =
   if Array.length data <> fcqt.fft_size then failwith "Invalid input size!";
-  let fft_data = fcqt.fft data in
-  let data = transform_matrix fcqt fft_data fcqt.matrix in
+  fcqt.fft data;
+  let data = transform_matrix fcqt fcqt.matrix in
   if fcqt.params.reassign then begin
-    let t_data = transform_matrix fcqt fft_data fcqt.t_matrix in
-    let f_data = transform_matrix fcqt fft_data fcqt.f_matrix in
+    let t_data = transform_matrix fcqt fcqt.t_matrix in
+    let f_data = transform_matrix fcqt fcqt.f_matrix in
     reassign ~fcqt ~t_data ~f_data data
   end
   else frame_magnitude data
 
-let sample_size { fft_size } = fft_size
+let sample_size { fft_size; _ } = fft_size
