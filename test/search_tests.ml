@@ -6,7 +6,7 @@ let suite =
       let search_called = ref false in
       let search hashes =
         search_called := true;
-        assert_equal [ 34l; 78l ] hashes;
+        assert_equal [ 34; 78 ] hashes;
         [
           [ { Db.id = 1; pos = 12 }; { Db.id = 3; pos = 43 } ];
           [ { Db.id = 1; pos = 56 } ];
@@ -14,12 +14,12 @@ let suite =
       in
       let search_map = Search_map.init search in
       let positions = Hashtbl.create 2 in
-      Hashtbl.add positions 34l { Search_map.rel_pos = 2 };
-      Hashtbl.add positions 78l { Search_map.rel_pos = 46 };
+      Hashtbl.add positions 34 { Search_map.rel_pos = 2 };
+      Hashtbl.add positions 78 { Search_map.rel_pos = 46 };
       let hashes =
         {
           Search_map.ofs = 1234;
-          hashes = Hashes.HashSet.of_list [ 34l; 78l ];
+          hashes = Hashes.HashSet.of_list [ 34; 78 ];
           positions;
         }
       in
@@ -65,7 +65,7 @@ let suite =
       let mk pos hash = { Hashes.pos; hash } in
       let hashes =
         IStream.make
-          [ mk 1 2l; mk 2 4l; mk 3 6l; mk 7 8l; mk 9 10l; mk 10 12l; mk 13 14l ]
+          [ mk 1 2; mk 2 4; mk 3 6; mk 7 8; mk 9 10; mk 10 12; mk 13 14 ]
       in
       let audio_params =
         { Audio.default_params with Audio.frame_step = 0.01 }
@@ -90,21 +90,21 @@ let suite =
                   (rel_pos, hash) :: ret)
                 frame.Search_map.positions []
             in
-            assert_equal hash_list (List.rev h)
+            assert_equal (List.sort compare hash_list) (List.sort compare h)
       in
-      frame_equal 1 [ (0, 2l); (1, 4l) ] (frames ());
-      frame_equal 2 [ (0, 4l); (1, 6l) ] (frames ());
-      frame_equal 3 [ (0, 6l) ] (frames ());
+      frame_equal 1 [ (0, 2); (1, 4) ] (frames ());
+      frame_equal 2 [ (0, 4); (1, 6) ] (frames ());
+      frame_equal 3 [ (0, 6) ] (frames ());
       frame_equal max_int [] (frames ());
       frame_equal max_int [] (frames ());
-      frame_equal 7 [ (0, 8l) ] (frames ());
-      frame_equal 7 [ (0, 8l) ] (frames ());
-      frame_equal 9 [ (0, 10l) ] (frames ());
-      frame_equal 9 [ (0, 10l); (1, 12l) ] (frames ());
-      frame_equal 10 [ (0, 12l) ] (frames ());
+      frame_equal 7 [ (0, 8) ] (frames ());
+      frame_equal 7 [ (0, 8) ] (frames ());
+      frame_equal 9 [ (0, 10) ] (frames ());
+      frame_equal 9 [ (0, 10); (1, 12) ] (frames ());
+      frame_equal 10 [ (0, 12) ] (frames ());
       frame_equal max_int [] (frames ());
-      frame_equal 13 [ (0, 14l) ] (frames ());
-      frame_equal 13 [ (0, 14l) ] (frames ());
+      frame_equal 13 [ (0, 14) ] (frames ());
+      frame_equal 13 [ (0, 14) ] (frames ());
       assert_equal None (frames ());
       assert_equal None (frames ()) );
   ]

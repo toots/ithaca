@@ -16,15 +16,11 @@
  *)
 
 type peak = int * int
-type hash = Int32.t
+type hash = int
 type hashes = { pos : int; hash : hash }
 type t = hashes IStream.t
 
-module HashSet = Set.Make (struct
-  type t = hash
-
-  let compare = compare
-end)
+module HashSet = Set.Make (Int)
 
 let frames ~length ~step chunks =
   let buffer = Float_buffer.init () in
@@ -152,16 +148,14 @@ let pairs ~delta_x ~delta_y ~max_x ~max_y peaks =
     | Some peaks -> Some (find_peaks peaks)
     | None -> None
 
+(* Pack b̂1 (10 bits), Δbin (11 bits, signed) and Δtime (11 bits, signed)
+   into a 32-bit integer. Injective as long as b̂1 < 1024 and the deltas
+   stay within ±1023, which holds for any realistic profile. *)
 let hash ?(b1_divisor = 6) (x1, y1) (x2, y2) =
   let b1_hat = y1 / b1_divisor in
-  let str = Printf.sprintf "%i%i%i" b1_hat (y2 - y1) (x2 - x1) in
-  let digest = Cryptokit.hash_string (Cryptokit.Hash.sha256 ()) str in
-  Int32.of_string
-    (Printf.sprintf "0x%x%x%x%x"
-       (Char.code digest.[0])
-       (Char.code digest.[1])
-       (Char.code digest.[2])
-       (Char.code digest.[3]))
+  ((b1_hat land 0x3ff) lsl 22)
+  lor (((y2 - y1) land 0x7ff) lsl 11)
+  lor ((x2 - x1) land 0x7ff)
 
 let merge h1 h2 =
   let next1 = ref (h1 ()) in

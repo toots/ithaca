@@ -34,7 +34,7 @@ external close : t -> unit = "ocaml_lmdb_close"
 external lmdb_put_profile : t -> string -> unit = "ocaml_lmdb_put_profile"
 external lmdb_get_profile : t -> string = "ocaml_lmdb_get_profile"
 
-external lmdb_put : t -> int -> (int32 * values) array -> unit
+external lmdb_put : t -> int -> (int * values) array -> unit
   = "ocaml_lmdb_put"
 
 let wrap ?(must_exist = true) path f arg =
@@ -73,7 +73,7 @@ let put path max =
       in
       lmdb_put env max hashes)
 
-external lmdb_get : t -> int32 array -> values array = "ocaml_lmdb_get"
+external lmdb_get : t -> int array -> values array = "ocaml_lmdb_get"
 
 let get path =
   wrap path (fun env hashes ->

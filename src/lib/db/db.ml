@@ -44,7 +44,7 @@ type t = {
   search : Hashes.hash list -> search_match list;
 }
 
-module Set = Set.Make (Int32)
+module Set = Set.Make (Int)
 
 let make { saturate; max_id_per_hash; max_pos_per_hash } { put; get } =
   let insert l =

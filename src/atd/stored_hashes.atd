@@ -26,7 +26,7 @@ type data = {
   pos_d:     uint32
 }
 type values = data list
-type hash = int <ocaml repr="int32">
+type hash = int
 type hashes = (hash*values) list
 type stored_hashes = {
   profile: string;

@@ -333,7 +333,7 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
   check_error(NULL, txn, mdb_cursor_open(txn, dbi, &cursor));
 
   for (l = 0; l < Wosize_val(_hashes); l++) {
-    hash = Int32_val(Field(Field(_hashes, l), 0));
+    hash = Long_val(Field(Field(_hashes, l), 0));
 
     if (check_hash_saturation(cursor, txn, sdbi, hash) == 1)
       continue;
@@ -428,7 +428,7 @@ CAMLprim value ocaml_lmdb_get(value _env, value _keys)
   ans = caml_alloc_tuple(Wosize_val(_keys));
 
   for (k = 0; k < Wosize_val(_keys); k++) {
-    hash = Int32_val(Field(_keys, k));
+    hash = Long_val(Field(_keys, k));
 
     if (check_hash_saturation(cursor, txn, sdbi, hash) == 1) {
       Store_field(ans, k, Atom(0));

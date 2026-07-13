@@ -16,7 +16,7 @@
  *)
 
 type peak = int * int
-type hash = Int32.t
+type hash = int
 type hashes = { pos : int; hash : hash }
 type t = hashes IStream.t
 

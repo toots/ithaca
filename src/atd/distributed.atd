@@ -37,11 +37,9 @@ type result <ocaml from="Search" t="result"> = abstract
 
 type results = result list
 
-type int32 = int <ocaml repr="int32">
-
 type hash_entry = {
   pos:  int;
-  hash: int32
+  hash: int
 }
 
 type hashes = hash_entry list
