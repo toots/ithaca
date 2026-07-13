@@ -67,12 +67,22 @@ let search t frame =
 
   let result = ref None in
 
+  (* Votes must also agree on the pitch offset, within a ~2 semitone
+     bucket (6 bins at 36 bins/octave): hash collisions that happen to
+     line up in time but come from unrelated frequency regions scatter
+     across buckets instead of polluting the count and the pitch
+     estimate. *)
+  let bin_bucket bin_delta =
+    int_of_float (floor ((float bin_delta +. 3.) /. 6.))
+  in
+
   let incr_entry (id, delta) offset bin_delta =
+    let key = (id, delta, bin_bucket bin_delta) in
     let count, offset, bin_sum =
-      try Hashtbl.find counts (id, delta) with Not_found -> (0, offset, 0)
+      try Hashtbl.find counts key with Not_found -> (0, offset, 0)
     in
     let bin_sum = bin_sum + bin_delta in
-    Hashtbl.replace counts (id, delta) (count + 1, offset, bin_sum);
+    Hashtbl.replace counts key (count + 1, offset, bin_sum);
     let bin_delta = float bin_sum /. float (count + 1) in
     match !result with
     | None -> result := Some { id; delta; count; offset; bin_delta }

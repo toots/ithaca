@@ -66,7 +66,7 @@ let args =
       "Mode of operation, one of: \"enqueue\", \"search\", \"hash\" or \
        \"finalize\". Default: \"enqueue\"" );
   ]
-  @ [ Args.profile_arg ] @ [ Args.store_arg ]
+  @ [ Args.profile_arg; Args.scheme_arg; Args.store_arg ]
 
 let search_params () = { (Args.search_params ()) with Search.debug = !debug }
 
@@ -113,12 +113,12 @@ let make_storage fn =
   let db = Db.make (Args.db_params ()) operations in
   fn db
 
-let hashes_of_wav ~audio_params filename header =
+let hashes_of_wav ?(probes = false) ~audio_params filename header =
   let header = Wav_j.header_of_string header in
   let length = (Unix.stat filename).Unix.st_size in
   let open_wav merger =
     let ic = open_in_bin filename in
-    Audio.hash_wav ~merger ~params:audio_params
+    Audio.hash_wav ~merger ~params:audio_params ~probes
       (Wav.from_raw ~header ~length ic)
   in
   match Args.merger () with
@@ -169,7 +169,7 @@ let search () =
   let hashes =
     match (!header, !filename, !hashes) with
     | header, filename, _ when header <> "" && filename <> "" ->
-        hashes_of_wav ~audio_params filename header
+        hashes_of_wav ~probes:true ~audio_params filename header
     | _, _, hashes when hashes <> "" -> hashes_of_hashes hashes
     | _ ->
         Printf.eprintf "Invalid usage!\n";

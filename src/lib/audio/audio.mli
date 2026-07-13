@@ -21,6 +21,8 @@ type merger_mode = Single of channel_merger | Both
 val mono_merger : channel_merger
 val center_merger : channel_merger
 
+type hash_scheme = Pairs | Quads
+
 type audio_params = {
   samplerate : int;
   frame_step : float;
@@ -28,6 +30,7 @@ type audio_params = {
   hashes_max_freq : float;
   hashes_bins_per_octave : float;
   hashes_reassign : bool;
+  hashes_scheme : hash_scheme;
   peaks_delta_x : float;
   peaks_delta_y : int;
   pairs_max_x : float;
@@ -47,9 +50,12 @@ type instruments = {
   pairs : (Hashes.peak * Hashes.peak) list instrument;
 }
 
+(* [probes] enables quantization-boundary probing in the quads scheme and
+   should be set on the query (search) side only. *)
 val hash_wav :
   ?instruments:instruments ->
   ?merger:channel_merger ->
   ?params:audio_params ->
+  ?probes:bool ->
   Wav.t ->
   Hashes.t

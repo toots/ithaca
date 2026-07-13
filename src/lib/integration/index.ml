@@ -23,6 +23,7 @@ type config = {
   max_files : int; (* 0 = no limit *)
   b1_divisor : int option;
   reassign : bool;
+  scheme : string option;
   jobs : int; (* 0 = auto *)
 }
 
@@ -86,7 +87,7 @@ let run ?(interrupted = fun () -> false) config =
               if
                 Ithaca_ops.index_file ~ithaca_bin:config.ithaca_bin
                   ~b1_divisor:config.b1_divisor ~reassign:config.reassign
-                  ~on_stage config.db_path file id
+                  ~scheme:config.scheme ~on_stage config.db_path file id
               then begin
                 Atomic.incr n_indexed;
                 Mutex.lock indexed_mutex;

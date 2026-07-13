@@ -38,6 +38,7 @@ type search_match = {
   match_stop : int;
   match_id : int;
   match_offset : int;
+  match_delta : int;
   match_votes : int;
   match_bin_delta : float;
 }

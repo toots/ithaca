@@ -72,6 +72,7 @@ let args =
         Args.store_arg;
         Args.b1_divisor_arg;
         Args.reassign_arg;
+        Args.scheme_arg;
         Args.whitening_time_arg;
       ])
 
@@ -92,11 +93,11 @@ let print_time t =
   let t = int_of_float t in
   Printf.sprintf "%02d:%02d:%02d" (t / 3600) (t / 60 mod 60) (t mod 60)
 
-let get_hashes () =
+let get_hashes ?(probes = false) () =
   let params = Args.audio_params () in
   let open_wav merger =
     let wav = Wav.fopen !input_filename in
-    let hash = Audio.hash_wav ~merger ~params wav in
+    let hash = Audio.hash_wav ~merger ~params ~probes wav in
     fun () ->
       match hash () with
       | Some value -> Some value
@@ -197,7 +198,7 @@ let search () =
   in
   let results, processing_time =
     time (fun () ->
-        let hashes = get_hashes () in
+        let hashes = get_hashes ~probes:true () in
         Search.search_hashes ~params ~audio_params ~search hashes)
   in
   let results =

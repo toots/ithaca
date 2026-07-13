@@ -9,6 +9,7 @@ let () =
              Ringbuffer_tests.suite;
              Fcqt_tests.suite;
              Hashes_tests.suite;
+             Quads_tests.suite;
              Db_tests.suite;
              Search_tests.suite;
            ])

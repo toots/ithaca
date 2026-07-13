@@ -26,6 +26,7 @@ type profile = Profile_t.profile = {
   max_freq : float;
   bins_per_octave : float;
   reassign : bool;
+  scheme : string;
   delta_x : float;
   delta_y : int;
   max_x : float;
@@ -57,6 +58,7 @@ let profile =
       bins_per_octave = Audio.default_params.Audio.hashes_bins_per_octave;
       whitening_time = Audio.default_params.Audio.hashes_whitening_time;
       reassign = Audio.default_params.Audio.hashes_reassign;
+      scheme = "pairs";
       delta_x = Audio.default_params.Audio.peaks_delta_x;
       delta_y = Audio.default_params.Audio.peaks_delta_y;
       max_x = Audio.default_params.Audio.pairs_max_x;
@@ -135,6 +137,21 @@ let reassign_arg =
     "Enable frequency reassignment for sharper peak positions (slower, \
      disabled by default)." )
 
+let scheme_of_string = function
+  | "pairs" -> Audio.Pairs
+  | "quads" -> Audio.Quads
+  | s -> failwith (Printf.sprintf "Invalid hashing scheme: %s" s)
+
+let scheme_arg =
+  ( "-scheme",
+    Arg.String
+      (fun s ->
+        ignore (scheme_of_string s);
+        profile := { !profile with Profile_t.scheme = s }),
+    "Hashing scheme, one of: \"pairs\" (peak pairs, Fenet et al. 2011) or \
+     \"quads\" (peak quads, Sonnleitner & Widmer 2016, robust to larger \
+     pitch shifts). Default: \"pairs\"." )
+
 let whitening_time_arg =
   ( "-whitening-time",
     Arg.Float
@@ -194,6 +211,7 @@ let audio_params () =
     hashes_max_freq = !profile.max_freq;
     hashes_bins_per_octave = !profile.bins_per_octave;
     hashes_reassign = !profile.reassign;
+    hashes_scheme = scheme_of_string !profile.scheme;
     peaks_delta_x = !profile.delta_x;
     peaks_delta_y = !profile.delta_y;
     pairs_max_x = !profile.max_x;

@@ -32,6 +32,7 @@ let suite =
              match_stop = 1234;
              match_id = 1;
              match_offset = 12;
+             match_delta = 1224;
              match_votes = 2;
              match_bin_delta = 2.;
            })
@@ -51,6 +52,7 @@ let suite =
             match_stop = start;
             match_id = id;
             match_offset = ofs;
+            match_delta = 0;
             match_votes = 1;
             match_bin_delta = 0.;
           }
@@ -63,6 +65,7 @@ let suite =
              match_stop = 2;
              match_id = 3;
              match_offset = 4;
+             match_delta = 0;
              match_votes = 2;
              match_bin_delta = 0.;
            })

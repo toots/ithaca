@@ -37,6 +37,8 @@ let center_merger chunk =
     Array.init length (fun sample ->
         (chunk.(0).(sample) -. chunk.(1).(sample)) /. 2.0)
 
+type hash_scheme = Pairs | Quads
+
 type audio_params = {
   samplerate : int;
   frame_step : float;
@@ -44,6 +46,7 @@ type audio_params = {
   hashes_max_freq : float;
   hashes_bins_per_octave : float;
   hashes_reassign : bool;
+  hashes_scheme : hash_scheme;
   peaks_delta_x : float;
   peaks_delta_y : int;
   pairs_max_x : float;
@@ -64,6 +67,7 @@ let default_params =
     hashes_max_freq = 5512.5;
     hashes_bins_per_octave = 36.0;
     hashes_reassign = false;
+    hashes_scheme = Pairs;
     peaks_delta_x = 0.4;
     peaks_delta_y = 12;
     pairs_max_x = 2.;
@@ -93,7 +97,7 @@ let may_apply s = function
 let default_instruments = { cqt = None; peaks = None; pairs = None }
 
 let hash_wav ?(instruments = default_instruments) ?(merger = mono_merger)
-    ?(params = default_params) wav =
+    ?(params = default_params) ?(probes = false) wav =
   let samplerate = float params.samplerate in
   let channels = Wav.channels wav in
   let convert, flush =
@@ -182,9 +186,12 @@ let hash_wav ?(instruments = default_instruments) ?(merger = mono_merger)
   let peaks = Hashes.peaks ~delta_x ~delta_y:params.peaks_delta_y rows in
   let peaks = may_apply peaks instruments.peaks in
   let max_x = int_of_float (params.pairs_max_x /. params.frame_step) in
-  let pairs =
-    Hashes.pairs ~delta_x ~delta_y:params.peaks_delta_y ~max_x
-      ~max_y:params.pairs_max_y peaks
-  in
-  let pairs = may_apply pairs instruments.pairs in
-  Hashes.hashes ~b1_divisor:params.hashes_b1_divisor pairs
+  match params.hashes_scheme with
+  | Quads -> Quads.hashes ~probes ~max_x ~max_y:params.pairs_max_y peaks
+  | Pairs ->
+      let pairs =
+        Hashes.pairs ~delta_x ~delta_y:params.peaks_delta_y ~max_x
+          ~max_y:params.pairs_max_y peaks
+      in
+      let pairs = may_apply pairs instruments.pairs in
+      Hashes.hashes ~b1_divisor:params.hashes_b1_divisor pairs

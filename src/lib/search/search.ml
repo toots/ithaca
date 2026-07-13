@@ -35,12 +35,21 @@ type search_match = {
   match_stop : int;
   match_id : int;
   match_offset : int;
+  (* Query-minus-track alignment: constant across frames of a genuine
+     match. Frames are only merged when their deltas agree, so a noise
+     frame that hits the same track at an unrelated alignment cannot
+     extend a match nor skew its pitch estimate. *)
+  match_delta : int;
   (* Number of hash votes behind this match, used to weight [match_bin_delta]
      when merging frames: low-vote noise frames should not skew the pitch
      estimate. *)
   match_votes : int;
   match_bin_delta : float;
 }
+
+(* Two frames belong to the same match when their alignments agree within
+   this many frames (0.3s at the default frame step). *)
+let delta_tolerance = 12
 
 let result_of_match ~params ~audio_params
     {
@@ -49,6 +58,7 @@ let result_of_match ~params ~audio_params
       match_id;
       match_bin_delta;
       match_offset = _;
+      match_delta = _;
       match_votes = _;
     } =
   let t_of_o ofs = float ofs *. audio_params.Audio.frame_step in
@@ -126,6 +136,7 @@ let best_match ~debug search_map frame =
           match_stop = frame.Search_map.ofs;
           match_id = id;
           match_offset = offset;
+          match_delta = delta;
           (* [count] is the vote count before the winning entry's last
              increment: the actual number of votes is one more. *)
           match_votes = count + 1;
@@ -133,14 +144,16 @@ let best_match ~debug search_map frame =
         }
   | _ -> None
 
-exception Got_match
-
 type buffered_match = {
   mutable count : int;
   mutable mstop : int;
   mutable votes : int;
   mutable bin_sum : float;
 }
+
+let same_alignment m m' =
+  m.match_id = m'.match_id
+  && abs (m.match_delta - m'.match_delta) <= delta_tolerance
 
 let buffered_match ~params content =
   let counts = Hashtbl.create params.buffer_size in
@@ -169,19 +182,14 @@ let buffered_match ~params content =
     }
   in
   let process_match m =
-    try
-      Hashtbl.iter
-        (fun (match_id, _, _) c ->
-          if m.match_id = match_id then begin
-            c.count <- c.count + 1;
-            c.mstop <- m.match_stop;
-            c.votes <- c.votes + m.match_votes;
-            c.bin_sum <- c.bin_sum +. (m.match_bin_delta *. float m.match_votes);
-            raise Got_match
-          end)
-        counts;
-      add_match m
-    with Got_match -> ()
+    match List.find_opt (same_alignment m) !keys with
+    | Some m' ->
+        let c = Hashtbl.find counts (key_of_match m') in
+        c.count <- c.count + 1;
+        c.mstop <- m.match_stop;
+        c.votes <- c.votes + m.match_votes;
+        c.bin_sum <- c.bin_sum +. (m.match_bin_delta *. float m.match_votes)
+    | None -> add_match m
   in
   for i = 0 to params.buffer_size - 1 do
     match Ringbuffer.get content i with None -> () | Some m -> process_match m
@@ -276,7 +284,7 @@ let search_hashes ?(params = default_params) ~search ~audio_params hashes =
   let is_matching = ref false in
   let append_match m =
     match !results with
-    | m' :: tail when !is_matching && m.match_id = m'.match_id ->
+    | m' :: tail when !is_matching && same_alignment m m' ->
         let votes = m'.match_votes + m.match_votes in
         let bin_delta =
           ((m'.match_bin_delta *. float m'.match_votes)

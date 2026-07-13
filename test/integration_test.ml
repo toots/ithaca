@@ -16,6 +16,7 @@ let cmd_index argv =
         max_files = 0;
         b1_divisor = None;
         reassign = false;
+        scheme = None;
         jobs = 0;
       }
   in
@@ -43,6 +44,9 @@ let cmd_index argv =
       ( "--reassign",
         Arg.Unit (fun () -> c := { !c with reassign = true }),
         "  Enable frequency reassignment (sharper peaks, ~6x slower)" );
+      ( "--scheme",
+        Arg.String (fun s -> c := { !c with scheme = Some s }),
+        "NAME  Hashing scheme: pairs (default) or quads" );
       ( "--jobs",
         Arg.Int (fun n -> c := { !c with jobs = n }),
         "N  Parallel jobs (default: Domain.recommended_domain_count ())" );

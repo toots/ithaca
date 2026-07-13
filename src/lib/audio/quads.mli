@@ -15,26 +15,20 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *)
 
-type arg = Arg.key * Arg.spec * Arg.doc
+(* Quad-based hashing (Sonnleitner & Widmer, IEEE TASLP 2016): four peaks
+   normalized into the unit box spanned by the two outer ones, quantized to
+   a 32-bit hash. Invariant to pitch shifting on the log-frequency axis. *)
 
-val parse :
-  ?allow_anon:bool ->
-  args:(Arg.key * Arg.spec * Arg.doc) list ->
-  Arg.usage_msg ->
-  unit
+(* Hash of a single quad: anchor, far corner, and two interior peaks. *)
+val hash : Hashes.peak -> Hashes.peak -> Hashes.peak -> Hashes.peak -> int
 
-val anonymous_args : unit -> string list
-val profile_arg : arg
-val b1_divisor_arg : arg
-val reassign_arg : arg
-val scheme_arg : arg
-val whitening_time_arg : arg
-val base64_profile : unit -> string
-val set_base64_profile : string -> unit
-val json_profile : unit -> string
-val audio_params : unit -> Audio.audio_params
-val merger : unit -> Audio.merger_mode
-val store_arg : arg
-val lmdb_operations : unit -> Db.operations
-val db_params : unit -> Db.params
-val search_params : unit -> Search.search_params
+(* Turn a peak stream into a quad hash stream. With [probes] (query side),
+   components near a quantization-cell boundary also emit the adjacent
+   cell's hash to tolerate boundary jitter; without (index side), exactly
+   one hash per quad. *)
+val hashes :
+  ?probes:bool ->
+  max_x:int ->
+  max_y:int ->
+  Hashes.peak list IStream.t ->
+  Hashes.t

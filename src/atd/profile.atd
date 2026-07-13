@@ -22,6 +22,7 @@ type profile = {
   max_freq: float;
   bins_per_octave: float;
   reassign: bool;
+  ~scheme <ocaml default="\"pairs\"">: string;
   delta_x: float;
   delta_y: int;
   max_x: float;
