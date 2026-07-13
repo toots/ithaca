@@ -24,6 +24,9 @@ module HashSet = Set.Make (Int)
 
 let frames ~length ~step chunks =
   let buffer = Float_buffer.init () in
+  (* The frame array is reused between calls: each call overwrites the
+     previously returned frame. *)
+  let frame = Array.make length 0. in
   let rec fill len =
     if len < Float_buffer.length buffer then ()
     else
@@ -37,15 +40,8 @@ let frames ~length ~step chunks =
     fill length;
     if Float_buffer.length buffer = 0 then None
     else begin
-      let frame =
-        if Float_buffer.length buffer < length then begin
-          let frame = Array.make length 0. in
-          let rem = Float_buffer.peek buffer length in
-          Array.blit rem 0 frame 0 (Array.length rem);
-          frame
-        end
-        else Float_buffer.peek buffer length
-      in
+      let filled = Float_buffer.blit buffer frame length in
+      Array.fill frame filled (length - filled) 0.;
       fill step;
       ignore (Float_buffer.drop buffer step);
       Some frame

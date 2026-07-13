@@ -31,14 +31,15 @@ let add t data =
 
 exception Done
 
-let peek t len =
+(* Copy up to [len] samples into [dst] without consuming them. Returns the
+   number of samples actually copied. *)
+let blit t dst len =
   let len = min len (length t) in
-  let ret = Array.make len 0. in
   let cur_available = Array.length t.cur - t.cur_offset in
   let cur_to_copy = min cur_available len in
   let position =
     if 0 < cur_to_copy then begin
-      Array.blit t.cur t.cur_offset ret 0 cur_to_copy;
+      Array.blit t.cur t.cur_offset dst 0 cur_to_copy;
       cur_to_copy
     end
     else 0
@@ -46,7 +47,7 @@ let peek t len =
   if position < len then begin
     let fill (position, remaining) data =
       let to_copy = min remaining (Array.length data) in
-      Array.blit data 0 ret position to_copy;
+      Array.blit data 0 dst position to_copy;
       if remaining = to_copy then raise Done
       else (position + to_copy, remaining - to_copy)
     in
@@ -55,6 +56,12 @@ let peek t len =
       assert false
     with Done -> ()
   end;
+  len
+
+let peek t len =
+  let len = min len (length t) in
+  let ret = Array.make len 0. in
+  ignore (blit t ret len);
   ret
 
 let drop t len =

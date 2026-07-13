@@ -22,3 +22,7 @@ val length : t -> int
 val add : t -> float array -> unit
 val peek : t -> int -> float array
 val drop : t -> int -> int
+
+(* Copy up to [len] samples into the given array without consuming them.
+   Returns the number of samples actually copied. *)
+val blit : t -> float array -> int -> int
