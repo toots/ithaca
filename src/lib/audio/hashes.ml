@@ -175,6 +175,14 @@ let merge h1 h2 =
           Some h2_h
         end
 
+(* Pull both streams to completion in parallel domains, then merge.
+   The streams must be fully constructed by the caller before this runs:
+   FFTW plan creation is not thread-safe, only stream consumption is. *)
+let merge_parallel h1 h2 =
+  let d1 = Domain.spawn (fun () -> IStream.pull h1) in
+  let d2 = Domain.spawn (fun () -> IStream.pull h2) in
+  merge (IStream.make (Domain.join d1)) (IStream.make (Domain.join d2))
+
 let hashes ?(b1_divisor = 6) pairs =
   let queue = Queue.create () in
   fun () ->

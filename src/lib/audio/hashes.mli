@@ -45,3 +45,8 @@ val hashes : ?b1_divisor:int -> (peak * peak) list IStream.t -> t
 
 (* Merge two hash streams into one, interleaved by position. *)
 val merge : t -> t -> t
+
+(* Same as [merge], but each stream is consumed to completion in its own
+   domain first. Both streams must already be fully constructed: FFTW plan
+   creation is not thread-safe, only stream consumption is. *)
+val merge_parallel : t -> t -> t

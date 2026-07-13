@@ -126,7 +126,9 @@ let hashes_of_wav ~audio_params filename header =
   | Audio.Both ->
       if header.Wav_t.channels = 1 then open_wav Audio.mono_merger
       else
-        Hashes.merge (open_wav Audio.mono_merger) (open_wav Audio.center_merger)
+        Hashes.merge_parallel
+          (open_wav Audio.mono_merger)
+          (open_wav Audio.center_merger)
 
 let hash () =
   if !header = "" || !filename = "" then begin

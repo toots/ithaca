@@ -113,7 +113,7 @@ let get_hashes () =
         Wav.close wav;
         if is_mono then open_wav Audio.mono_merger
         else
-          Hashes.merge
+          Hashes.merge_parallel
             (open_wav Audio.mono_merger)
             (open_wav Audio.center_merger)
   in
@@ -138,9 +138,9 @@ let store () =
     (Filename.basename !input_filename)
     (Wav.info wav);
   Wav.close wav;
-  let hashes = get_hashes () in
   let _, processing_time =
     time (fun () ->
+        let hashes = get_hashes () in
         let id = match !store_id with Some id -> id | None -> assert false in
         Printf.eprintf "Storing at ID: %i\n%!" id;
         let fn { Db.insert } = insert [ (id, hashes) ] in
@@ -183,7 +183,6 @@ let search () =
     (Wav.info wav);
   let duration = Wav.duration wav in
   Wav.close wav;
-  let hashes = get_hashes () in
   let params = search_params () in
   let audio_params = Args.audio_params () in
   let search hashes =
@@ -192,7 +191,9 @@ let search () =
     make_store operations get_search
   in
   let results, processing_time =
-    time (fun () -> Search.search_hashes ~params ~audio_params ~search hashes)
+    time (fun () ->
+        let hashes = get_hashes () in
+        Search.search_hashes ~params ~audio_params ~search hashes)
   in
   let results =
     List.map
