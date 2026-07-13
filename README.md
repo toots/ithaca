@@ -65,10 +65,10 @@ Each wrapper rebuilds automatically if the source has changed.
 % ithaca -mode store -lmdb-path /path/to/fingerprint.db -i /path/to/1234.wav -id 1234
 ithaca -- Audio Fingerprinting in exile
 Storing: 1234.wav
-WAVE PCM Data 2ch, 44100Hz 16bit, duration: 00:02:30
+WAVE PCM Data 2ch, 44100Hz 16bit, duration: 00:02:48
 Storing at ID: 1234
-Position: 00:02:29, generated 4632 hashes
-Processing time: 00:00:06 (24.7x realtime)
+Position: 00:02:49, generated 10767 hashes
+Processing time: 00:00:00 (252.1x realtime)
 ```
 
 ### Searching
@@ -78,10 +78,10 @@ Processing time: 00:00:06 (24.7x realtime)
 ithaca -- Audio Fingerprinting in exile
 Reading hashing profile from /path/to/fingerprint.db..
 Search for matches in sample.wav
-WAVE PCM Data 2ch, 44100Hz 16bit, duration: 00:00:50
-Position: 00:00:49, generated 2485 hashes
-Processing time: 00:00:02 (20.5x realtime)
-Found match: 0.00 -> 50.00: ID 1234
+WAVE PCM Data 2ch, 44100Hz 16bit, duration: 00:00:20
+Position: 00:00:20, generated 1198 hashes
+Processing time: 00:00:00 (79.9x realtime)
+Found match: 0.03 -> 20.00: ID 1234
 ```
 
 ## Integration tests
