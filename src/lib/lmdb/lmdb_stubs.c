@@ -26,7 +26,6 @@
 #include <errno.h>
 #include <lmdb.h>
 #include <stdint.h>
-#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -49,6 +48,15 @@ static struct custom_operations lmdb_env_ops = {
     custom_compare_ext_default, custom_fixed_length_default};
 
 #define Env_val(v) (*((MDB_env **)Data_custom_val(v)))
+
+static const int db_flags = MDB_CREATE | MDB_INTEGERKEY;
+
+static void raise_lmdb_error(int rc)
+{
+  if (rc == ENOMEM)
+    caml_raise_out_of_memory();
+  caml_raise_with_arg(*caml_named_value("ocaml_lmdb_error"), Val_int(rc));
+}
 
 CAMLprim value ocaml_lmdb_string_of_error(value code)
 {
@@ -78,7 +86,7 @@ CAMLprim value ocaml_lmdb_open(value file)
 
   rc = mdb_env_create(&env);
   if (rc != 0)
-    caml_raise_with_arg(*caml_named_value("ocaml_lmdb_error"), Val_int(rc));
+    raise_lmdb_error(rc);
 
   mdb_env_set_mapsize(env, map_size);
   mdb_env_set_maxdbs(env, 3);
@@ -87,7 +95,7 @@ CAMLprim value ocaml_lmdb_open(value file)
   rc = mdb_env_open(env, String_val(file), MDB_NOTLS | MDB_NOSUBDIR, 0755);
   if (rc != 0) {
     mdb_env_close(env);
-    caml_raise_with_arg(*caml_named_value("ocaml_lmdb_error"), Val_int(rc));
+    raise_lmdb_error(rc);
   }
 
   wrapper = caml_alloc_custom(&lmdb_env_ops, sizeof(MDB_env *), 0, 1);
@@ -96,32 +104,6 @@ CAMLprim value ocaml_lmdb_open(value file)
   CAMLreturn(wrapper);
 }
 
-#define check_error(cursor, txn, ret)                                          \
-  do {                                                                         \
-    int _tmp = (ret);                                                          \
-    if (_tmp != 0) {                                                           \
-      if (_tmp == MDB_NOTFOUND) {                                              \
-        if (cursor) {                                                          \
-          mdb_cursor_close(cursor);                                            \
-        }                                                                      \
-        if (txn) {                                                             \
-          mdb_txn_commit(txn);                                                 \
-        }                                                                      \
-        caml_raise_not_found();                                                \
-      } else {                                                                 \
-        fprintf(stderr, "lmdb_stubs.c error at line %d\n", __LINE__);          \
-        if (cursor) {                                                          \
-          mdb_cursor_close(cursor);                                            \
-        }                                                                      \
-        if (txn) {                                                             \
-          mdb_txn_abort(txn);                                                  \
-        }                                                                      \
-        caml_raise_with_arg(*caml_named_value("ocaml_lmdb_error"),             \
-                            Val_int(_tmp));                                    \
-      }                                                                        \
-    }                                                                          \
-  } while (0)
-
 CAMLprim value ocaml_lmdb_put_profile(value _env, value _profile)
 {
   CAMLparam2(_env, _profile);
@@ -129,14 +111,18 @@ CAMLprim value ocaml_lmdb_put_profile(value _env, value _profile)
   MDB_env *env = Env_val(_env);
   MDB_dbi dbi;
   MDB_val key, data;
+  size_t profile_len = caml_string_length(_profile);
+  char *profile = malloc(profile_len);
   int rc;
+
+  if (!profile)
+    caml_raise_out_of_memory();
+  memcpy(profile, String_val(_profile), profile_len);
 
   key.mv_size = strlen(ITHACA_PROFILE_KEY);
   key.mv_data = ITHACA_PROFILE_KEY;
-  data.mv_size = caml_string_length(_profile);
-
-  caml_register_generational_global_root(&_profile);
-  data.mv_data = (void *)String_val(_profile);
+  data.mv_size = profile_len;
+  data.mv_data = profile;
 
   caml_enter_blocking_section();
   rc = mdb_txn_begin(env, NULL, 0, &txn);
@@ -151,10 +137,10 @@ CAMLprim value ocaml_lmdb_put_profile(value _env, value _profile)
     rc = mdb_txn_commit(txn);
   caml_leave_blocking_section();
 
-  caml_remove_generational_global_root(&_profile);
+  free(profile);
 
   if (rc != 0)
-    caml_raise_with_arg(*caml_named_value("ocaml_lmdb_error"), Val_int(rc));
+    raise_lmdb_error(rc);
 
   CAMLreturn(Val_unit);
 }
@@ -188,14 +174,18 @@ CAMLprim value ocaml_lmdb_get_profile(value _env)
     else
       memcpy(buf, data.mv_data, buf_size);
   }
-  if (txn)
-    mdb_txn_commit(txn);
+  if (txn) {
+    if (rc == 0 || rc == MDB_NOTFOUND)
+      mdb_txn_commit(txn);
+    else
+      mdb_txn_abort(txn);
+  }
   caml_leave_blocking_section();
 
   if (rc == MDB_NOTFOUND)
     caml_raise_not_found();
   if (rc != 0)
-    caml_raise_with_arg(*caml_named_value("ocaml_lmdb_error"), Val_int(rc));
+    raise_lmdb_error(rc);
 
   _ans = caml_alloc_string(buf_size);
   memcpy(Bytes_val(_ans), buf, buf_size);
@@ -204,101 +194,86 @@ CAMLprim value ocaml_lmdb_get_profile(value _env)
   CAMLreturn(_ans);
 }
 
-int db_flags = MDB_CREATE | MDB_INTEGERKEY;
+/* The helpers below run inside blocking sections: they must not raise and
+ * report failures through their return code instead. */
 
-static inline int check_hash_saturation(MDB_cursor *cursor, MDB_txn *txn,
-                                        MDB_dbi dbi, uint32_t hash)
+static int check_hash_saturation(MDB_txn *txn, MDB_dbi sdbi, uint32_t hash,
+                                 int *saturated)
 {
-  MDB_val key;
-  MDB_val data;
-  int ret;
+  MDB_val key, data;
+  int rc;
 
   key.mv_size = sizeof(hash);
   key.mv_data = &hash;
 
-  ret = mdb_get(txn, dbi, &key, &data);
+  rc = mdb_get(txn, sdbi, &key, &data);
 
-  if (ret == MDB_NOTFOUND)
+  if (rc == MDB_NOTFOUND) {
+    *saturated = 0;
     return 0;
-
-  check_error(cursor, txn, ret);
-
-  return 1;
+  }
+  if (rc == 0)
+    *saturated = 1;
+  return rc;
 }
 
-static inline uint64_t count_hash_ids(MDB_cursor *cursor, MDB_txn *txn,
-                                      uint32_t hash)
+static int count_hash_ids(MDB_cursor *cursor, uint32_t hash, uint64_t *count)
 {
-  MDB_val key;
-  MDB_val data;
-  uint64_t stored_key;
-  uint32_t match;
-  uint64_t count = 0;
-  uint16_t id_r;
-  uint16_t old_id_r = 0;
-  int ret;
+  MDB_val key, data;
+  uint64_t stored_key = ((uint64_t)hash) << 32;
+  uint16_t id_r, old_id_r = 0;
+  int rc;
+
+  *count = 0;
 
   key.mv_size = sizeof(stored_key);
   key.mv_data = &stored_key;
 
-  stored_key = ((uint64_t)hash) << 32;
+  rc = mdb_cursor_get(cursor, &key, &data, MDB_SET_RANGE);
 
-  ret = mdb_cursor_get(cursor, &key, &data, MDB_SET_RANGE);
-
-  while (1) {
-    if (ret == MDB_NOTFOUND)
-      return count;
-    check_error(cursor, txn, ret);
-    check_error(cursor, txn,
-                mdb_cursor_get(cursor, &key, &data, MDB_GET_CURRENT));
+  while (rc == 0) {
     stored_key = *((uint64_t *)key.mv_data);
-    match = stored_key >> 32;
-    if (match != hash)
-      return count;
+    if ((uint32_t)(stored_key >> 32) != hash)
+      return 0;
     id_r = stored_key >> 16;
-    if (count == 0 || id_r != old_id_r)
-      count++;
+    if (*count == 0 || id_r != old_id_r)
+      (*count)++;
     old_id_r = id_r;
-    ret = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
+    rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
   }
+
+  return rc == MDB_NOTFOUND ? 0 : rc;
 }
 
-static inline void mark_hash_as_saturated(MDB_cursor *cursor, MDB_txn *txn,
-                                          MDB_dbi sdbi, uint32_t hash)
+static int mark_hash_as_saturated(MDB_cursor *cursor, MDB_txn *txn,
+                                  MDB_dbi sdbi, uint32_t hash)
 {
-  MDB_val key;
-  MDB_val data;
-  uint64_t stored_key;
-  uint32_t match;
-  int ret;
+  MDB_val key, data;
+  uint64_t stored_key = ((uint64_t)hash) << 32;
+  int rc;
 
   key.mv_size = sizeof(stored_key);
   key.mv_data = &stored_key;
 
-  stored_key = ((uint64_t)hash) << 32;
+  rc = mdb_cursor_get(cursor, &key, &data, MDB_SET_RANGE);
 
-  ret = mdb_cursor_get(cursor, &key, &data, MDB_SET_RANGE);
-
-  while (1) {
-    if (ret == MDB_NOTFOUND)
+  while (rc == 0) {
+    if ((uint32_t)(*((uint64_t *)key.mv_data) >> 32) != hash)
       break;
-    check_error(cursor, txn, ret);
-    check_error(cursor, txn,
-                mdb_cursor_get(cursor, &key, &data, MDB_GET_CURRENT));
-    match = *((uint64_t *)key.mv_data) >> 32;
-    if (match != hash)
-      break;
-    check_error(cursor, txn, mdb_cursor_del(cursor, 0));
-    ret = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
+    rc = mdb_cursor_del(cursor, 0);
+    if (rc != 0)
+      return rc;
+    rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
   }
+  if (rc != 0 && rc != MDB_NOTFOUND)
+    return rc;
 
   key.mv_size = sizeof(hash);
   key.mv_data = &hash;
-
   data.mv_size = sizeof(hash);
   data.mv_data = &hash;
 
-  check_error(cursor, txn, mdb_put(txn, sdbi, &key, &data, 0));
+  return mdb_put(txn, sdbi, &key, &data, 0);
 }
 
 CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
@@ -306,41 +281,45 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
   CAMLparam2(_env, _hashes);
   CAMLlocal1(_data);
   MDB_txn *txn = NULL;
+  MDB_cursor *cursor = NULL;
   MDB_env *env = Env_val(_env);
   MDB_dbi dbi, sdbi;
-  MDB_val key;
-  MDB_val data;
-  MDB_cursor *cursor = NULL;
-  unsigned int l, i;
+  MDB_val key, data;
   uint64_t max = Long_val(_max);
+  size_t hash_count = Wosize_val(_hashes);
+  size_t total_entries = 0;
+  size_t l, i, pos;
   uint16_t id_r, pos_r;
   uint32_t id_d, pos_d;
-  uint64_t stored_key;
-  uint64_t stored_data;
-  uint32_t hash;
+  int rc = 0;
 
-  key.mv_size = sizeof(stored_key);
-  ;
-  key.mv_data = &stored_key;
+  for (l = 0; l < hash_count; l++)
+    total_entries += Wosize_val(Field(Field(_hashes, l), 1));
 
-  data.mv_size = sizeof(stored_data);
-  data.mv_data = &stored_data;
+  uint32_t *hashes = malloc(hash_count * sizeof(uint32_t));
+  size_t *counts = malloc(hash_count * sizeof(size_t));
+  uint64_t *stored_keys = malloc(total_entries * sizeof(uint64_t));
+  uint64_t *stored_datas = malloc(total_entries * sizeof(uint64_t));
 
-  check_error(NULL, NULL, mdb_txn_begin(env, NULL, 0, &txn));
-  check_error(NULL, txn, mdb_dbi_open(txn, ITHACA_DB, db_flags, &dbi));
-  check_error(NULL, txn,
-              mdb_dbi_open(txn, ITHACA_SATURATED_DB, db_flags, &sdbi));
-  check_error(NULL, txn, mdb_cursor_open(txn, dbi, &cursor));
+  if ((hash_count && (!hashes || !counts)) ||
+      (total_entries && (!stored_keys || !stored_datas))) {
+    free(hashes);
+    free(counts);
+    free(stored_keys);
+    free(stored_datas);
+    caml_raise_out_of_memory();
+  }
 
-  for (l = 0; l < Wosize_val(_hashes); l++) {
-    hash = Long_val(Field(Field(_hashes, l), 0));
-
-    if (check_hash_saturation(cursor, txn, sdbi, hash) == 1)
-      continue;
-
+  /* Copy everything out of the OCaml heap so the runtime lock can be
+   * released for the duration of the write transaction. */
+  pos = 0;
+  for (l = 0; l < hash_count; l++) {
+    uint32_t hash = Long_val(Field(Field(_hashes, l), 0));
+    hashes[l] = hash;
     _data = Field(Field(_hashes, l), 1);
+    counts[l] = Wosize_val(_data);
 
-    for (i = 0; i < Wosize_val(_data); i++) {
+    for (i = 0; i < counts[l]; i++) {
       // data is a record {id_r; pos_r; id_d; pos_d}
       id_r = Int_val(Field(Field(_data, i), 0));
       pos_r = Int_val(Field(Field(_data, i), 1));
@@ -348,151 +327,207 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
       pos_d = Int_val(Field(Field(_data, i), 3));
 
       // Pack hash,id_r,pos_r into key
-      stored_key = ((uint64_t)pos_r) | (((uint64_t)id_r) << 16) |
-                   (((uint64_t)hash) << 32);
+      stored_keys[pos] = ((uint64_t)pos_r) | (((uint64_t)id_r) << 16) |
+                         (((uint64_t)hash) << 32);
       // Pack id_d(32) | pos_d(32) into value
-      stored_data = ((uint64_t)pos_d) | (((uint64_t)id_d) << 32);
-
-      check_error(cursor, txn, mdb_cursor_put(cursor, &key, &data, 0));
-
-      if (0 < max && max <= count_hash_ids(cursor, txn, hash)) {
-        mark_hash_as_saturated(cursor, txn, sdbi, hash);
-        break;
-      }
+      stored_datas[pos] = ((uint64_t)pos_d) | (((uint64_t)id_d) << 32);
+      pos++;
     }
   }
 
-  mdb_cursor_close(cursor);
-  cursor = NULL;
-  check_error(NULL, NULL, mdb_txn_commit(txn));
+  caml_enter_blocking_section();
+
+  rc = mdb_txn_begin(env, NULL, 0, &txn);
+  if (rc == 0)
+    rc = mdb_dbi_open(txn, ITHACA_DB, db_flags, &dbi);
+  if (rc == 0)
+    rc = mdb_dbi_open(txn, ITHACA_SATURATED_DB, db_flags, &sdbi);
+  if (rc == 0)
+    rc = mdb_cursor_open(txn, dbi, &cursor);
+
+  pos = 0;
+  for (l = 0; rc == 0 && l < hash_count; l++) {
+    int saturated = 0;
+
+    rc = check_hash_saturation(txn, sdbi, hashes[l], &saturated);
+    if (rc != 0 || saturated) {
+      pos += counts[l];
+      continue;
+    }
+
+    for (i = 0; rc == 0 && i < counts[l]; i++) {
+      key.mv_size = sizeof(uint64_t);
+      key.mv_data = &stored_keys[pos + i];
+      data.mv_size = sizeof(uint64_t);
+      data.mv_data = &stored_datas[pos + i];
+
+      rc = mdb_cursor_put(cursor, &key, &data, 0);
+
+      if (rc == 0 && 0 < max) {
+        uint64_t id_count;
+        rc = count_hash_ids(cursor, hashes[l], &id_count);
+        if (rc == 0 && max <= id_count) {
+          rc = mark_hash_as_saturated(cursor, txn, sdbi, hashes[l]);
+          break;
+        }
+      }
+    }
+    pos += counts[l];
+  }
+
+  if (cursor)
+    mdb_cursor_close(cursor);
+  if (txn) {
+    if (rc == 0)
+      rc = mdb_txn_commit(txn);
+    else
+      mdb_txn_abort(txn);
+  }
+
+  caml_leave_blocking_section();
+
+  free(hashes);
+  free(counts);
+  free(stored_keys);
+  free(stored_datas);
+
+  if (rc != 0)
+    raise_lmdb_error(rc);
 
   CAMLreturn(Val_unit);
 }
 
-static value fetch_values(MDB_cursor *cursor, MDB_txn *txn, value ans,
-                          size_t pos)
-{
-  CAMLparam1(ans);
-  CAMLlocal1(tmp);
-
-  uint16_t id_r, pos_r;
-  uint32_t id_d, pos_d;
-  uint64_t stored;
-  MDB_val key, data;
-
-  check_error(cursor, txn,
-              mdb_cursor_get(cursor, &key, &data, MDB_GET_CURRENT));
-
-  stored = *((uint64_t *)key.mv_data);
-  pos_r = stored;
-  id_r = stored >> 16;
-
-  stored = *((uint64_t *)data.mv_data);
-  pos_d = stored & 0xFFFFFFFF;
-  id_d = stored >> 32;
-
-  // Store record {id_r; pos_r; id_d; pos_d}
-  tmp = caml_alloc_tuple(4);
-
-  Store_field(tmp, 0, Val_int(id_r));
-  Store_field(tmp, 1, Val_int(pos_r));
-  Store_field(tmp, 2, Val_int(id_d));
-  Store_field(tmp, 3, Val_int(pos_d));
-
-  Store_field(ans, pos, tmp);
-
-  CAMLreturn(Val_unit);
-}
+typedef struct {
+  uint64_t key;
+  uint64_t data;
+} stored_entry;
 
 CAMLprim value ocaml_lmdb_get(value _env, value _keys)
 {
   CAMLparam2(_env, _keys);
-  CAMLlocal2(ans, tmp);
+  CAMLlocal3(ans, tmp, entry);
   MDB_txn *txn = NULL;
   MDB_env *env = Env_val(_env);
   MDB_cursor *cursor = NULL;
   MDB_dbi dbi, sdbi;
-  MDB_val key;
-  MDB_val data;
-  uint16_t k, c, n = 0;
-  uint32_t match, hash;
-  uint64_t initial_key;
-  int ret;
+  MDB_val key, data;
+  size_t key_count = Wosize_val(_keys);
+  size_t entries_len = 0, entries_cap = 1024;
+  size_t k, c, pos;
+  int rc = 0;
 
-  check_error(NULL, NULL, mdb_txn_begin(env, NULL, MDB_RDONLY, &txn));
-  check_error(NULL, txn, mdb_dbi_open(txn, ITHACA_DB, db_flags, &dbi));
-  check_error(NULL, txn,
-              mdb_dbi_open(txn, ITHACA_SATURATED_DB, db_flags, &sdbi));
-  check_error(NULL, txn, mdb_cursor_open(txn, dbi, &cursor));
+  uint32_t *hashes = malloc(key_count * sizeof(uint32_t));
+  size_t *counts = calloc(key_count, sizeof(size_t));
+  stored_entry *entries = malloc(entries_cap * sizeof(stored_entry));
 
-  ans = caml_alloc_tuple(Wosize_val(_keys));
+  if ((key_count && (!hashes || !counts)) || !entries) {
+    free(hashes);
+    free(counts);
+    free(entries);
+    caml_raise_out_of_memory();
+  }
 
-  for (k = 0; k < Wosize_val(_keys); k++) {
-    hash = Long_val(Field(_keys, k));
+  for (k = 0; k < key_count; k++)
+    hashes[k] = Long_val(Field(_keys, k));
 
-    if (check_hash_saturation(cursor, txn, sdbi, hash) == 1) {
-      Store_field(ans, k, Atom(0));
+  caml_enter_blocking_section();
+
+  rc = mdb_txn_begin(env, NULL, MDB_RDONLY, &txn);
+  if (rc == 0)
+    rc = mdb_dbi_open(txn, ITHACA_DB, db_flags, &dbi);
+  if (rc == 0)
+    rc = mdb_dbi_open(txn, ITHACA_SATURATED_DB, db_flags, &sdbi);
+  if (rc == 0)
+    rc = mdb_cursor_open(txn, dbi, &cursor);
+
+  for (k = 0; rc == 0 && k < key_count; k++) {
+    uint64_t initial_key = ((uint64_t)hashes[k]) << 32;
+    int saturated = 0;
+    int ret;
+
+    rc = check_hash_saturation(txn, sdbi, hashes[k], &saturated);
+    if (rc != 0 || saturated)
       continue;
-    }
 
-    initial_key = ((uint64_t)hash) << 32;
     key.mv_size = sizeof(initial_key);
     key.mv_data = &initial_key;
 
     ret = mdb_cursor_get(cursor, &key, &data, MDB_SET_RANGE);
 
-    if (ret == MDB_NOTFOUND) {
-      Store_field(ans, k, Atom(0));
-      continue;
-    }
-
-    check_error(cursor, txn, ret);
-
-    check_error(cursor, txn,
-                mdb_cursor_get(cursor, &key, &data, MDB_GET_CURRENT));
-    match = *((uint64_t *)key.mv_data) >> 32;
-    if (match != hash) {
-      Store_field(ans, k, Atom(0));
-      continue;
-    }
-
-    // Count data
-    n = 1;
-    while (1) {
+    while (ret == 0) {
+      uint64_t stored_key = *((uint64_t *)key.mv_data);
+      if ((uint32_t)(stored_key >> 32) != hashes[k])
+        break;
+      if (entries_len == entries_cap) {
+        entries_cap *= 2;
+        stored_entry *grown =
+            realloc(entries, entries_cap * sizeof(stored_entry));
+        if (!grown) {
+          rc = ENOMEM;
+          break;
+        }
+        entries = grown;
+      }
+      entries[entries_len].key = stored_key;
+      entries[entries_len].data = *((uint64_t *)data.mv_data);
+      entries_len++;
+      counts[k]++;
       ret = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
-
-      if (ret == MDB_NOTFOUND)
-        break;
-      check_error(cursor, txn, ret);
-
-      check_error(cursor, txn,
-                  mdb_cursor_get(cursor, &key, &data, MDB_GET_CURRENT));
-      match = *((uint64_t *)key.mv_data) >> 32;
-      if (match != hash)
-        break;
-
-      n++;
     }
-
-    // Rewind cursor
-    for (c = n; 0 < c; c--)
-      check_error(cursor, txn, mdb_cursor_get(cursor, &key, &data, MDB_PREV));
-
-    tmp = caml_alloc_tuple(n);
-
-    fetch_values(cursor, txn, tmp, 0);
-
-    for (c = 1; c < n; c++) {
-      check_error(cursor, txn, mdb_cursor_get(cursor, &key, &data, MDB_NEXT));
-      fetch_values(cursor, txn, tmp, c);
-    }
-
-    Store_field(ans, k, tmp);
+    if (rc == 0 && ret != 0 && ret != MDB_NOTFOUND)
+      rc = ret;
   }
 
-  mdb_cursor_close(cursor);
-  cursor = NULL;
-  check_error(NULL, NULL, mdb_txn_commit(txn));
+  if (cursor)
+    mdb_cursor_close(cursor);
+  if (txn) {
+    if (rc == 0)
+      rc = mdb_txn_commit(txn);
+    else
+      mdb_txn_abort(txn);
+  }
+
+  caml_leave_blocking_section();
+
+  if (rc != 0) {
+    free(hashes);
+    free(counts);
+    free(entries);
+    raise_lmdb_error(rc);
+  }
+
+  ans = caml_alloc(key_count, 0);
+
+  pos = 0;
+  for (k = 0; k < key_count; k++) {
+    if (counts[k] == 0) {
+      Store_field(ans, k, Atom(0));
+      continue;
+    }
+
+    tmp = caml_alloc(counts[k], 0);
+    Store_field(ans, k, tmp);
+
+    for (c = 0; c < counts[k]; c++, pos++) {
+      uint16_t pos_r = entries[pos].key;
+      uint16_t id_r = entries[pos].key >> 16;
+      uint32_t pos_d = entries[pos].data & 0xFFFFFFFF;
+      uint32_t id_d = entries[pos].data >> 32;
+
+      // Store record {id_r; pos_r; id_d; pos_d}
+      entry = caml_alloc_tuple(4);
+      Store_field(entry, 0, Val_int(id_r));
+      Store_field(entry, 1, Val_int(pos_r));
+      Store_field(entry, 2, Val_int(id_d));
+      Store_field(entry, 3, Val_int(pos_d));
+
+      Store_field(tmp, c, entry);
+    }
+  }
+
+  free(hashes);
+  free(counts);
+  free(entries);
 
   CAMLreturn(ans);
 }
