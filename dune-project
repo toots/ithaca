@@ -11,12 +11,11 @@
  (description
   "OCaml implementation of the scalable audio fingerprinting algorithm (Fenet et al., ISMIR 2011).")
  (depends
-  (ocaml (>= "4.14"))
+  (ocaml (>= "5.1"))
   (dune (>= "3.22"))
   (atdgen :build)
   atdgen-runtime
   cryptokit
-  domain_shims
   fftw3
   samplerate
   (ounit2 :with-test)

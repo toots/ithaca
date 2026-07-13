@@ -5,12 +5,11 @@ description:
   "OCaml implementation of the scalable audio fingerprinting algorithm (Fenet et al., ISMIR 2011)."
 license: "GPL-3.0-or-later"
 depends: [
-  "ocaml" {>= "4.14"}
-  "dune" {>= "3.22" & >= "3.22"}
+  "ocaml" {>= "5.1"}
+  "dune" {>= "3.22"}
   "atdgen" {build}
   "atdgen-runtime"
   "cryptokit"
-  "domain_shims"
   "fftw3"
   "samplerate"
   "ounit2" {with-test}

@@ -1,4 +1,4 @@
 (library
  (name ithaca_integration)
  (wrapped false)
- (libraries domain_shims ithaca_atd unix threads))
+ (libraries ithaca_atd unix threads))

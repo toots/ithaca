@@ -18,8 +18,13 @@
 type 'a t = unit -> 'a option
 
 let make l =
-  let s = Stream.of_list l in
-  fun () -> try Some (Stream.next s) with Stream.Failure -> None
+  let s = ref l in
+  fun () ->
+    match !s with
+    | [] -> None
+    | x :: rest ->
+        s := rest;
+        Some x
 
 let pull s =
   let ret = ref [] in
