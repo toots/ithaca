@@ -23,22 +23,41 @@ type search_params = {
   debug : bool;
 }
 
-type result = Search_t.result = { start : float; stop : float; id : string }
+type result = Search_t.result = {
+  start : float;
+  stop : float;
+  id : string;
+  pitch_semitones : float;
+}
 
 type search_match = {
   match_start : int;
   match_stop : int;
   match_id : int;
   match_offset : int;
+  (* Number of hash votes behind this match, used to weight [match_bin_delta]
+     when merging frames: low-vote noise frames should not skew the pitch
+     estimate. *)
+  match_votes : int;
+  match_bin_delta : float;
 }
 
 let result_of_match ~params ~audio_params
-    { match_start; match_stop; match_id; match_offset = _ } =
+    {
+      match_start;
+      match_stop;
+      match_id;
+      match_bin_delta;
+      match_offset = _;
+      match_votes = _;
+    } =
   let t_of_o ofs = float ofs *. audio_params.Audio.frame_step in
   {
     start = t_of_o match_start;
     stop = t_of_o match_stop +. params.frame_length;
     id = string_of_int match_id;
+    pitch_semitones =
+      match_bin_delta *. 12. /. audio_params.Audio.hashes_bins_per_octave;
   }
 
 type search_entry = Db.match_entry list
@@ -53,7 +72,7 @@ let default_params =
     debug = false;
   }
 
-type hash_entry = { pos : int; hash : Hashes.hash }
+type hash_entry = { pos : int; hash : Hashes.hash; bin : int }
 
 let frames ~params ~audio_params hashes =
   let frame = ref [] in
@@ -76,8 +95,8 @@ let frames ~params ~audio_params hashes =
     let positions = Hashtbl.create (List.length ret) in
     let hashes =
       List.fold_left
-        (fun hashes { pos; hash } ->
-          Hashtbl.add positions hash { Search_map.rel_pos = pos - min };
+        (fun hashes { pos; hash; bin } ->
+          Hashtbl.add positions hash { Search_map.rel_pos = pos - min; bin };
           Hashes.HashSet.add hash hashes)
         Hashes.HashSet.empty ret
     in
@@ -85,8 +104,8 @@ let frames ~params ~audio_params hashes =
   in
   let rec pull () =
     match hashes () with
-    | Some { Hashes.pos; hash } ->
-        frame := { pos; hash } :: !frame;
+    | Some { Hashes.pos; hash; bin } ->
+        frame := { pos; hash; bin } :: !frame;
         last_pos := max !last_pos (t_of_p pos);
         if params.frame_length <= size () then advance () else pull ()
     | None -> if !frame <> [] then advance () else None
@@ -95,23 +114,33 @@ let frames ~params ~audio_params hashes =
 
 let best_match ~debug search_map frame =
   match Search_map.search search_map frame with
-  | Some { Search_map.id; delta; count; offset } ->
+  | Some { Search_map.id; delta; count; offset; bin_delta } ->
       if debug then
         Printf.eprintf
-          "Best match: id: %d, delta: %d, offset: %d, count: %d\n%!" id delta
-          offset count;
+          "Best match: id: %d, delta: %d, offset: %d, count: %d, bin delta: %.2f\n\
+           %!"
+          id delta offset count bin_delta;
       Some
         {
           match_start = frame.Search_map.ofs;
           match_stop = frame.Search_map.ofs;
           match_id = id;
           match_offset = offset;
+          (* [count] is the vote count before the winning entry's last
+             increment: the actual number of votes is one more. *)
+          match_votes = count + 1;
+          match_bin_delta = bin_delta;
         }
   | _ -> None
 
 exception Got_match
 
-type buffered_match = { mutable count : int; mutable mstop : int }
+type buffered_match = {
+  mutable count : int;
+  mutable mstop : int;
+  mutable votes : int;
+  mutable bin_sum : float;
+}
 
 let buffered_match ~params content =
   let counts = Hashtbl.create params.buffer_size in
@@ -119,23 +148,35 @@ let buffered_match ~params content =
   let key_of_match { match_id; match_offset; match_start; _ } =
     (match_id, match_offset, match_start)
   in
-  let match_of_key (match_id, match_offset, match_start) =
-    { match_id; match_offset; match_start; match_stop = match_start }
-  in
   let add_match m =
     keys := m :: !keys;
-    Hashtbl.add counts (key_of_match m) { count = 1; mstop = m.match_stop }
+    Hashtbl.add counts (key_of_match m)
+      {
+        count = 1;
+        mstop = m.match_stop;
+        votes = m.match_votes;
+        bin_sum = m.match_bin_delta *. float m.match_votes;
+      }
   in
   let count m = (Hashtbl.find counts (key_of_match m)).count in
-  let stop m = (Hashtbl.find counts (key_of_match m)).mstop in
+  let merged m =
+    let c = Hashtbl.find counts (key_of_match m) in
+    {
+      m with
+      match_stop = c.mstop;
+      match_votes = c.votes;
+      match_bin_delta = c.bin_sum /. float c.votes;
+    }
+  in
   let process_match m =
     try
       Hashtbl.iter
-        (fun k c ->
-          let m' = match_of_key k in
-          if m.match_id = m'.match_id then begin
+        (fun (match_id, _, _) c ->
+          if m.match_id = match_id then begin
             c.count <- c.count + 1;
             c.mstop <- m.match_stop;
+            c.votes <- c.votes + m.match_votes;
+            c.bin_sum <- c.bin_sum +. (m.match_bin_delta *. float m.match_votes);
             raise Got_match
           end)
         counts;
@@ -149,20 +190,19 @@ let buffered_match ~params content =
     (fun cur m ->
       match (m, cur) with
       | m, _ when count m < params.threshold -> cur
-      | m, Some m' when count m' < count m ->
-          Some { m with match_stop = stop m }
-      | m, None -> Some { m with match_stop = stop m }
+      | m, Some m' when count m' < count m -> Some (merged m)
+      | m, None -> Some (merged m)
       | _ -> cur)
     None !keys
 
 let consolidate matches =
   let h = Hashtbl.create 1024 in
-  let process { start; stop; id } =
+  let process { start; stop; id; pitch_semitones } =
     if Hashtbl.mem h id then begin
       let m = Hashtbl.find h id in
       let m, rem =
         List.partition
-          (fun (start', stop') ->
+          (fun (start', stop', _) ->
             (*            start             stop
              *              |-----------------|
              *   |------------------|
@@ -178,20 +218,29 @@ let consolidate matches =
           m
       in
       let start =
-        List.fold_left (fun start (start', _) -> min start start') start m
+        List.fold_left (fun start (start', _, _) -> min start start') start m
       in
       let stop =
-        List.fold_left (fun stop (_, stop') -> max stop stop') stop m
+        List.fold_left (fun stop (_, stop', _) -> max stop stop') stop m
       in
-      Hashtbl.replace h id ([ (start, stop) ] @ rem)
+      (* Merged segments belong to the same alignment: keep the existing
+         segment's pitch when there is one. *)
+      let pitch_semitones =
+        match m with (_, _, pitch) :: _ -> pitch | [] -> pitch_semitones
+      in
+      Hashtbl.replace h id ([ (start, stop, pitch_semitones) ] @ rem)
     end
-    else Hashtbl.add h id [ (start, stop) ]
+    else Hashtbl.add h id [ (start, stop, pitch_semitones) ]
   in
   List.iter process matches;
   let matches =
     Hashtbl.fold
       (fun id positions cur ->
-        cur @ List.map (fun (start, stop) -> { id; start; stop }) positions)
+        cur
+        @ List.map
+            (fun (start, stop, pitch_semitones) ->
+              { id; start; stop; pitch_semitones })
+            positions)
       h []
   in
   let compare m m' = compare m.start m'.start in
@@ -228,7 +277,20 @@ let search_hashes ?(params = default_params) ~search ~audio_params hashes =
   let append_match m =
     match !results with
     | m' :: tail when !is_matching && m.match_id = m'.match_id ->
-        results := { m' with match_stop = m.match_stop } :: tail
+        let votes = m'.match_votes + m.match_votes in
+        let bin_delta =
+          ((m'.match_bin_delta *. float m'.match_votes)
+          +. (m.match_bin_delta *. float m.match_votes))
+          /. float votes
+        in
+        results :=
+          {
+            m' with
+            match_stop = m.match_stop;
+            match_votes = votes;
+            match_bin_delta = bin_delta;
+          }
+          :: tail
     | _ -> results := m :: !results
   in
   let rec pull () =

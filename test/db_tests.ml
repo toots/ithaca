@@ -19,11 +19,11 @@ let suite =
       let hashes =
         IStream.make
           [
-            { Hashes.pos = 2; hash = 228002194 };
-            { Hashes.pos = 4; hash = -1366283977 };
-            { Hashes.pos = 0; hash = -840465741 };
-            { Hashes.pos = 0; hash = -892327182 };
-            { Hashes.pos = 1; hash = -291067170 };
+            { Hashes.pos = 2; hash = 228002194; bin = 12 };
+            { Hashes.pos = 4; hash = -1366283977; bin = 34 };
+            { Hashes.pos = 0; hash = -840465741; bin = 56 };
+            { Hashes.pos = 0; hash = -892327182; bin = 78 };
+            { Hashes.pos = 1; hash = -291067170; bin = 90 };
           ]
       in
       db.Db.insert [ (1234, hashes) ];

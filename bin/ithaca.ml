@@ -160,15 +160,20 @@ let search_stdout = function
   | [] -> Printf.eprintf "No matches found.. :-(\n%!"
   | l ->
       List.iter
-        (fun { Search.start; stop; id } ->
-          Printf.eprintf "Found match: %.02f -> %.02f: ID %s\n%!" start stop id)
+        (fun { Search.start; stop; id; pitch_semitones } ->
+          let pitch =
+            if abs_float pitch_semitones < 0.05 then ""
+            else Printf.sprintf " (pitch: %+.2f semitones)" pitch_semitones
+          in
+          Printf.eprintf "Found match: %.02f -> %.02f: ID %s%s\n%!" start stop
+            id pitch)
         l
 
 let search_csv results =
-  Printf.printf "start, stop, ID\n";
+  Printf.printf "start, stop, ID, pitch_semitones\n";
   List.iter
-    (fun { Search.start; stop; id } ->
-      Printf.printf "%f, %f, %s\n" start stop id)
+    (fun { Search.start; stop; id; pitch_semitones } ->
+      Printf.printf "%f, %f, %s, %f\n" start stop id pitch_semitones)
     results
 
 let search_json results =

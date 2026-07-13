@@ -16,7 +16,7 @@
  *)
 
 type raw_search = Db.match_entry list
-type query_entry = { rel_pos : int }
+type query_entry = { rel_pos : int; bin : int }
 
 type frame = {
   ofs : int;
@@ -24,7 +24,14 @@ type frame = {
   positions : (Hashes.hash, query_entry) Hashtbl.t;
 }
 
-type result = { id : int; offset : int; delta : int; count : int }
+type result = {
+  id : int;
+  offset : int;
+  delta : int;
+  count : int;
+  bin_delta : float;
+}
+
 type t
 
 val init : (Hashes.hash list -> raw_search list) -> t

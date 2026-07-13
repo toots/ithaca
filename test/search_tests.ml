@@ -8,14 +8,16 @@ let suite =
         search_called := true;
         assert_equal [ 34; 78 ] hashes;
         [
-          [ { Db.id = 1; pos = 12 }; { Db.id = 3; pos = 43 } ];
-          [ { Db.id = 1; pos = 56 } ];
+          [
+            { Db.id = 1; pos = 12; bin = 38 }; { Db.id = 3; pos = 43; bin = 10 };
+          ];
+          [ { Db.id = 1; pos = 56; bin = 78 } ];
         ]
       in
       let search_map = Search_map.init search in
       let positions = Hashtbl.create 2 in
-      Hashtbl.add positions 34 { Search_map.rel_pos = 2 };
-      Hashtbl.add positions 78 { Search_map.rel_pos = 46 };
+      Hashtbl.add positions 34 { Search_map.rel_pos = 2; bin = 40 };
+      Hashtbl.add positions 78 { Search_map.rel_pos = 46; bin = 80 };
       let hashes =
         {
           Search_map.ofs = 1234;
@@ -30,6 +32,8 @@ let suite =
              match_stop = 1234;
              match_id = 1;
              match_offset = 12;
+             match_votes = 2;
+             match_bin_delta = 2.;
            })
         (Search.best_match ~debug:false search_map hashes);
       assert_equal true !search_called;
@@ -47,6 +51,8 @@ let suite =
             match_stop = start;
             match_id = id;
             match_offset = ofs;
+            match_votes = 1;
+            match_bin_delta = 0.;
           }
       in
       let content = Ringbuffer.init [| m 1 3 4; m 2 3 5; m 3 1 2; m 4 5 6 |] in
@@ -57,12 +63,14 @@ let suite =
              match_stop = 2;
              match_id = 3;
              match_offset = 4;
+             match_votes = 2;
+             match_bin_delta = 0.;
            })
         (Search.buffered_match ~params content);
       let content = Ringbuffer.init [| m 1 3 4; None; m 2 1 2; m 3 5 6 |] in
       assert_equal None (Search.buffered_match ~params content) );
     ( "Frames" >:: fun _ ->
-      let mk pos hash = { Hashes.pos; hash } in
+      let mk pos hash = { Hashes.pos; hash; bin = 0 } in
       let hashes =
         IStream.make
           [ mk 1 2; mk 2 4; mk 3 6; mk 7 8; mk 9 10; mk 10 12; mk 13 14 ]

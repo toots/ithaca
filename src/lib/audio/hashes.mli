@@ -17,7 +17,10 @@
 
 type peak = int * int
 type hash = int
-type hashes = { pos : int; hash : hash }
+
+(* [bin] is the anchor peak's CQT bin: comparing it between a query hash and
+   the matching reference hash gives the pitch offset between the two. *)
+type hashes = { pos : int; hash : hash; bin : int }
 type t = hashes IStream.t
 
 module HashSet : Set.S with type elt = hash

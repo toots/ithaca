@@ -289,8 +289,9 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
   size_t hash_count = Wosize_val(_hashes);
   size_t total_entries = 0;
   size_t l, i, pos;
-  uint16_t id_r, pos_r;
+  uint16_t id_r, pos_r, bin;
   uint32_t id_d, pos_d;
+  uint64_t value_words[2];
   int rc = 0;
 
   for (l = 0; l < hash_count; l++)
@@ -300,13 +301,15 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
   size_t *counts = malloc(hash_count * sizeof(size_t));
   uint64_t *stored_keys = malloc(total_entries * sizeof(uint64_t));
   uint64_t *stored_datas = malloc(total_entries * sizeof(uint64_t));
+  uint64_t *stored_bins = malloc(total_entries * sizeof(uint64_t));
 
   if ((hash_count && (!hashes || !counts)) ||
-      (total_entries && (!stored_keys || !stored_datas))) {
+      (total_entries && (!stored_keys || !stored_datas || !stored_bins))) {
     free(hashes);
     free(counts);
     free(stored_keys);
     free(stored_datas);
+    free(stored_bins);
     caml_raise_out_of_memory();
   }
 
@@ -320,17 +323,20 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
     counts[l] = Wosize_val(_data);
 
     for (i = 0; i < counts[l]; i++) {
-      // data is a record {id_r; pos_r; id_d; pos_d}
+      // data is a record {id_r; pos_r; id_d; pos_d; bin}
       id_r = Int_val(Field(Field(_data, i), 0));
       pos_r = Int_val(Field(Field(_data, i), 1));
       id_d = Int_val(Field(Field(_data, i), 2));
       pos_d = Int_val(Field(Field(_data, i), 3));
+      bin = Int_val(Field(Field(_data, i), 4));
 
       // Pack hash,id_r,pos_r into key
       stored_keys[pos] = ((uint64_t)pos_r) | (((uint64_t)id_r) << 16) |
                          (((uint64_t)hash) << 32);
-      // Pack id_d(32) | pos_d(32) into value
+      // Pack id_d(32) | pos_d(32) into the first value word, the anchor
+      // bin into the second
       stored_datas[pos] = ((uint64_t)pos_d) | (((uint64_t)id_d) << 32);
+      stored_bins[pos] = bin;
       pos++;
     }
   }
@@ -358,8 +364,10 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
     for (i = 0; rc == 0 && i < counts[l]; i++) {
       key.mv_size = sizeof(uint64_t);
       key.mv_data = &stored_keys[pos + i];
-      data.mv_size = sizeof(uint64_t);
-      data.mv_data = &stored_datas[pos + i];
+      value_words[0] = stored_datas[pos + i];
+      value_words[1] = stored_bins[pos + i];
+      data.mv_size = sizeof(value_words);
+      data.mv_data = value_words;
 
       rc = mdb_cursor_put(cursor, &key, &data, 0);
 
@@ -390,6 +398,7 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
   free(counts);
   free(stored_keys);
   free(stored_datas);
+  free(stored_bins);
 
   if (rc != 0)
     raise_lmdb_error(rc);
@@ -400,6 +409,7 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
 typedef struct {
   uint64_t key;
   uint64_t data;
+  uint64_t bin;
 } stored_entry;
 
 CAMLprim value ocaml_lmdb_get(value _env, value _keys)
@@ -469,7 +479,11 @@ CAMLprim value ocaml_lmdb_get(value _env, value _keys)
         entries = grown;
       }
       entries[entries_len].key = stored_key;
-      entries[entries_len].data = *((uint64_t *)data.mv_data);
+      memcpy(&entries[entries_len].data, data.mv_data, sizeof(uint64_t));
+      entries[entries_len].bin = 0;
+      if (2 * sizeof(uint64_t) <= data.mv_size)
+        memcpy(&entries[entries_len].bin,
+               (char *)data.mv_data + sizeof(uint64_t), sizeof(uint64_t));
       entries_len++;
       counts[k]++;
       ret = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
@@ -513,13 +527,15 @@ CAMLprim value ocaml_lmdb_get(value _env, value _keys)
       uint16_t id_r = entries[pos].key >> 16;
       uint32_t pos_d = entries[pos].data & 0xFFFFFFFF;
       uint32_t id_d = entries[pos].data >> 32;
+      uint16_t bin = entries[pos].bin;
 
-      // Store record {id_r; pos_r; id_d; pos_d}
-      entry = caml_alloc_tuple(4);
+      // Store record {id_r; pos_r; id_d; pos_d; bin}
+      entry = caml_alloc_tuple(5);
       Store_field(entry, 0, Val_int(id_r));
       Store_field(entry, 1, Val_int(pos_r));
       Store_field(entry, 2, Val_int(id_d));
       Store_field(entry, 3, Val_int(pos_d));
+      Store_field(entry, 4, Val_int(bin));
 
       Store_field(tmp, c, entry);
     }

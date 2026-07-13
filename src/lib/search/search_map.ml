@@ -16,7 +16,7 @@
  *)
 
 type raw_search = Db.match_entry list
-type query_entry = { rel_pos : int }
+type query_entry = { rel_pos : int; bin : int }
 
 type frame = {
   ofs : int;
@@ -24,7 +24,15 @@ type frame = {
   positions : (Hashes.hash, query_entry) Hashtbl.t;
 }
 
-type result = { id : int; offset : int; delta : int; count : int }
+(* [bin_delta] is the average query-minus-reference anchor bin over the
+   entries that voted for this result: the pitch offset in CQT bins. *)
+type result = {
+  id : int;
+  offset : int;
+  delta : int;
+  count : int;
+  bin_delta : float;
+}
 
 type t = {
   mutable hash_cache : Hashes.HashSet.t;
@@ -59,27 +67,29 @@ let search t frame =
 
   let result = ref None in
 
-  let incr_entry (id, delta) offset =
-    let count, offset =
-      try Hashtbl.find counts (id, delta) with Not_found -> (0, offset)
+  let incr_entry (id, delta) offset bin_delta =
+    let count, offset, bin_sum =
+      try Hashtbl.find counts (id, delta) with Not_found -> (0, offset, 0)
     in
-    Hashtbl.replace counts (id, delta) (count + 1, offset);
+    let bin_sum = bin_sum + bin_delta in
+    Hashtbl.replace counts (id, delta) (count + 1, offset, bin_sum);
+    let bin_delta = float bin_sum /. float (count + 1) in
     match !result with
-    | None -> result := Some { id; delta; count; offset }
+    | None -> result := Some { id; delta; count; offset; bin_delta }
     | Some r when r.count <= count ->
-        result := Some { id; delta; count; offset }
+        result := Some { id; delta; count; offset; bin_delta }
     | _ -> ()
   in
 
   List.iter2
     (fun hash entries ->
       List.iter
-        (fun { Db.id; pos = track_ofs } ->
+        (fun { Db.id; pos = track_ofs; bin = ref_bin } ->
           let query_entries = Hashtbl.find_all frame.positions hash in
           List.iter
-            (fun { rel_pos } ->
+            (fun { rel_pos; bin = query_bin } ->
               let absolute_offset = frame.ofs + rel_pos - track_ofs in
-              incr_entry (id, absolute_offset) track_ofs)
+              incr_entry (id, absolute_offset) track_ofs (query_bin - ref_bin))
             query_entries)
         entries)
     hashes values;

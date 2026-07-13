@@ -21,8 +21,8 @@ let unpack =
   List.map (fun (hash, values) ->
       ( hash,
         List.map
-          (fun { Stored_hashes_t.id_r; pos_r; id_d; pos_d } ->
-            { Db.id_r; pos_r; id_d; pos_d })
+          (fun { Stored_hashes_t.id_r; pos_r; id_d; pos_d; bin } ->
+            { Db.id_r; pos_r; id_d; pos_d; bin })
           values ))
 
 let put _ hashes =
@@ -34,8 +34,8 @@ let put _ hashes =
           (fun (hash, values) ->
             ( hash,
               List.map
-                (fun { id_r; pos_r; id_d; pos_d } ->
-                  { Stored_hashes_t.id_r; pos_r; id_d; pos_d })
+                (fun { id_r; pos_r; id_d; pos_d; bin } ->
+                  { Stored_hashes_t.id_r; pos_r; id_d; pos_d; bin })
                 values ))
           hashes;
     }

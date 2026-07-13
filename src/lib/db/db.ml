@@ -19,10 +19,18 @@
 type uint16 = int
 type uint32 = int
 type hash = Hashes.hash
-type data = { id_r : uint16; pos_r : uint16; id_d : uint32; pos_d : uint32 }
+
+type data = {
+  id_r : uint16;
+  pos_r : uint16;
+  id_d : uint32;
+  pos_d : uint32;
+  bin : uint16;
+}
+
 type values = data list
 type max_id = int
-type match_entry = { id : int; pos : int }
+type match_entry = { id : int; pos : int; bin : int }
 
 type params = {
   max_id_per_hash : uint16;
@@ -55,12 +63,12 @@ let make { saturate; max_id_per_hash; max_pos_per_hash } { put; get } =
           let rec f hashes_set =
             match hashes () with
             | None -> hashes_set
-            | Some { Hashes.pos; hash } ->
+            | Some { Hashes.pos; hash; bin } ->
                 let id_r = id mod max_id_per_hash in
                 let pos_r = pos mod max_pos_per_hash in
                 let id_d = id / max_id_per_hash in
                 let pos_d = pos / max_pos_per_hash in
-                Hashtbl.add hashes_data hash { id_r; pos_r; id_d; pos_d };
+                Hashtbl.add hashes_data hash { id_r; pos_r; id_d; pos_d; bin };
                 let hashes_set = Set.add hash hashes_set in
                 f hashes_set
           in
@@ -81,11 +89,12 @@ let make { saturate; max_id_per_hash; max_pos_per_hash } { put; get } =
   let search hashes =
     let rec unpack_key_values cur = function
       | [] -> cur
-      | { id_r; pos_r; id_d; pos_d } :: rem ->
+      | { id_r; pos_r; id_d; pos_d; bin } :: rem ->
           unpack_key_values
             ({
                id = (id_d * max_id_per_hash) + id_r;
                pos = (pos_d * max_pos_per_hash) + pos_r;
+               bin;
              }
             :: cur)
             rem

@@ -18,7 +18,8 @@
 type result = {
   start: float;
   stop:  float;
-  id:    string
+  id:    string;
+  ~pitch_semitones: float
 }
 
 type results = result list

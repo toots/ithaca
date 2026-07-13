@@ -19,10 +19,18 @@
 type uint16 = int
 type uint32 = int
 type hash = Hashes.hash
-type data = { id_r : uint16; pos_r : uint16; id_d : uint32; pos_d : uint32 }
+
+type data = {
+  id_r : uint16;
+  pos_r : uint16;
+  id_d : uint32;
+  pos_d : uint32;
+  bin : uint16;
+}
+
 type values = data list
 type max_id = int
-type match_entry = { id : int; pos : int }
+type match_entry = { id : int; pos : int; bin : int }
 
 type params = {
   max_id_per_hash : uint16;

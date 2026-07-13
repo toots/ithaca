@@ -39,7 +39,8 @@ type results = result list
 
 type hash_entry = {
   pos:  int;
-  hash: int
+  hash: int;
+  bin:  int
 }
 
 type hashes = hash_entry list

@@ -141,7 +141,7 @@ let hash () =
   let buf = Buffer.create 4096 in
   let entries =
     List.map
-      (fun { Hashes.pos; hash } -> { Distributed_t.pos; hash })
+      (fun { Hashes.pos; hash; bin } -> { Distributed_t.pos; hash; bin })
       (IStream.pull hashes)
   in
   Distributed_j.write_hashes buf entries;
@@ -161,7 +161,7 @@ let hashes_of_hashes filename =
   let hashes = Buffer.contents buf in
   IStream.make
     (List.map
-       (fun { Distributed_t.pos; hash } -> { Hashes.pos; hash })
+       (fun { Distributed_t.pos; hash; bin } -> { Hashes.pos; hash; bin })
        (Distributed_j.hashes_of_string hashes))
 
 let search () =

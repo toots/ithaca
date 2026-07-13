@@ -23,7 +23,13 @@ type search_params = {
   debug : bool;
 }
 
-type result = Search_t.result = { start : float; stop : float; id : string }
+type result = Search_t.result = {
+  start : float;
+  stop : float;
+  id : string;
+  pitch_semitones : float;
+}
+
 type search_entry = Db.match_entry list
 type search = Hashes.hash list -> search_entry list
 
@@ -32,6 +38,8 @@ type search_match = {
   match_stop : int;
   match_id : int;
   match_offset : int;
+  match_votes : int;
+  match_bin_delta : float;
 }
 
 val default_params : search_params

@@ -72,17 +72,19 @@ let suite =
           ]
       in
       let hashes = Hashes.hashes pairs in
-      let check_entry pos hash = assert_equal (Some { Hashes.pos; hash }) in
+      let check_entry pos bin hash =
+        assert_equal (Some { Hashes.pos; hash; bin })
+      in
       let h0 = Hashes.hash (2, 3) (4, 5) in
       let h1 = Hashes.hash (4, 2) (3, 1) in
       let h2 = Hashes.hash (0, 4) (1, 3) in
       let h3 = Hashes.hash (0, 1) (1, 3) in
       let h4 = Hashes.hash (1, 3) (4, 2) in
-      check_entry 2 h0 (hashes ());
-      check_entry 4 h1 (hashes ());
-      check_entry 0 h2 (hashes ());
-      check_entry 0 h3 (hashes ());
-      check_entry 1 h4 (hashes ());
+      check_entry 2 3 h0 (hashes ());
+      check_entry 4 2 h1 (hashes ());
+      check_entry 0 4 h2 (hashes ());
+      check_entry 0 1 h3 (hashes ());
+      check_entry 1 3 h4 (hashes ());
       assert_equal None (hashes ());
       assert_equal None (hashes ()) );
   ]
