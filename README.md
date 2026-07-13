@@ -82,10 +82,7 @@ WAVE PCM Data 2ch, 44100Hz 16bit, duration: 00:00:50
 Position: 00:00:49, generated 2485 hashes
 Processing time: 00:00:02 (20.5x realtime)
 Found match: 0.00 -> 50.00: ID 1234
-Found match: 0.00 -> 50.00: ID 5678 (pitch: +2.0 semitones)
 ```
-
-Search results include a `pitch_semitones` field (also in JSON output) indicating the pitch offset of the query relative to the indexed audio. A value of `+2.0` means the query audio is pitched up by 2 semitones compared to what was indexed.
 
 ## Integration tests
 
