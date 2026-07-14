@@ -99,10 +99,17 @@ let run ?(interrupted = fun () -> false) config =
     in
     let cursor = Atomic.make 0 in
 
-    (* Hashing workers push hashed files here; the store worker drains it. *)
+    (* Hashing workers push hashed files here; the store worker drains it.
+       The queue is bounded: when hashing outruns storage, producers block on
+       [q_space] instead of piling up materialized hashes until we run out of
+       memory. Each pending item holds one file's hashes.
+       ponytail: fixed [max_pending] ceiling; expose as a config knob if a
+       deployment needs a different memory/throughput trade-off. *)
+    let max_pending = max 8 (4 * n_hashers) in
     let queue = Queue.create () in
     let q_mutex = Mutex.create () in
     let q_cond = Condition.create () in
+    let q_space = Condition.create () in
     let live_hashers = Atomic.make n_hashers in
 
     let render_header ~done_ ~audio ~itime =
@@ -161,6 +168,10 @@ let run ?(interrupted = fun () -> false) config =
               match hashes with
               | Some hashes ->
                   Mutex.lock q_mutex;
+                  (* Back-pressure: wait for the store worker to make room. *)
+                  while Queue.length queue >= max_pending do
+                    Condition.wait q_space q_mutex
+                  done;
                   Queue.add { hashes; file; id; dur; hash_time } queue;
                   Condition.signal q_cond;
                   Mutex.unlock q_mutex
@@ -196,6 +207,8 @@ let run ?(interrupted = fun () -> false) config =
         while not (Queue.is_empty queue) do
           batch := Queue.pop queue :: !batch
         done;
+        (* Room freed: wake any hashers blocked on back-pressure. *)
+        Condition.broadcast q_space;
         Mutex.unlock q_mutex;
         match List.rev !batch with
         | [] -> () (* queue empty and no live hashers: done *)
