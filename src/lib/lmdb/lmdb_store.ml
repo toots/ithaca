@@ -32,8 +32,11 @@ type values = Db.data array
 external connect : string -> t = "ocaml_lmdb_open"
 external lmdb_put_profile : t -> string -> unit = "ocaml_lmdb_put_profile"
 external lmdb_get_profile : t -> string = "ocaml_lmdb_get_profile"
-external lmdb_put : t -> int -> (int * values) array -> unit = "ocaml_lmdb_put"
-external lmdb_get : t -> int array -> values array = "ocaml_lmdb_get"
+
+external lmdb_put : t -> int -> int -> (int * values) array -> unit
+  = "ocaml_lmdb_put"
+
+external lmdb_get : t -> int array -> int -> values array = "ocaml_lmdb_get"
 
 (* Environments are opened once per path and kept for the lifetime of the
    process: the custom block finalizer closes them. Opening the same LMDB
@@ -64,15 +67,18 @@ let put_profile path profile =
 let get_profile path =
   Profile_b.profile_of_string (lmdb_get_profile (env_for path))
 
-let put path max hashes =
+let put ~max_entries path max hashes =
   let hashes =
     Array.of_list
       (List.map (fun (hash, values) -> (hash, Array.of_list values)) hashes)
   in
-  lmdb_put (env_for ~must_exist:false path) max hashes
+  lmdb_put (env_for ~must_exist:false path) max max_entries hashes
 
-let get path hashes =
+let get ~max_entries path hashes =
   List.map Array.to_list
-    (Array.to_list (lmdb_get (env_for path) (Array.of_list hashes)))
+    (Array.to_list (lmdb_get (env_for path) (Array.of_list hashes) max_entries))
 
-let operations path = { Db.put = put path; get = get path }
+(* [max_entries] bounds how many entries any single hash may hold: a hash
+   reaching it is dropped and marked dead (0 disables the limit). *)
+let operations ?(max_entries = 0) path =
+  { Db.put = put ~max_entries path; get = get ~max_entries path }

@@ -47,6 +47,8 @@ type audio_params = {
   hashes_bins_per_octave : float;
   hashes_reassign : bool;
   hashes_scheme : hash_scheme;
+  (* Quads scheme only: max quads anchored per peak (primary size lever). *)
+  hashes_quads_per_peak : int;
   peaks_delta_x : float;
   peaks_delta_y : int;
   pairs_max_x : float;
@@ -68,6 +70,7 @@ let default_params =
     hashes_bins_per_octave = 36.0;
     hashes_reassign = false;
     hashes_scheme = Pairs;
+    hashes_quads_per_peak = Quads.default_quads_per_peak;
     peaks_delta_x = 0.4;
     peaks_delta_y = 12;
     pairs_max_x = 2.;
@@ -196,7 +199,8 @@ let hash_wav ?(instruments = default_instruments) ?(merger = mono_merger)
           rows
       in
       let peaks = may_apply peaks instruments.peaks in
-      Quads.hashes ~probes ~max_x ~max_y:params.pairs_max_y peaks
+      Quads.hashes ~probes ~max_quads_per_peak:params.hashes_quads_per_peak
+        ~max_x ~max_y:params.pairs_max_y peaks
   | Pairs ->
       let peaks = Hashes.peaks ~delta_x ~delta_y:params.peaks_delta_y rows in
       let peaks = may_apply peaks instruments.peaks in

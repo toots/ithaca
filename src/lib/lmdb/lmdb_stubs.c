@@ -245,6 +245,30 @@ static int count_hash_ids(MDB_cursor *cursor, uint32_t hash, uint64_t *count)
   return rc == MDB_NOTFOUND ? 0 : rc;
 }
 
+static int count_hash_entries(MDB_cursor *cursor, uint32_t hash,
+                              uint64_t *count)
+{
+  MDB_val key, data;
+  uint64_t stored_key = ((uint64_t)hash) << 32;
+  int rc;
+
+  *count = 0;
+
+  key.mv_size = sizeof(stored_key);
+  key.mv_data = &stored_key;
+
+  rc = mdb_cursor_get(cursor, &key, &data, MDB_SET_RANGE);
+
+  while (rc == 0) {
+    if ((uint32_t)(*((uint64_t *)key.mv_data) >> 32) != hash)
+      return 0;
+    (*count)++;
+    rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
+  }
+
+  return rc == MDB_NOTFOUND ? 0 : rc;
+}
+
 static int mark_hash_as_saturated(MDB_cursor *cursor, MDB_txn *txn,
                                   MDB_dbi sdbi, uint32_t hash)
 {
@@ -276,7 +300,8 @@ static int mark_hash_as_saturated(MDB_cursor *cursor, MDB_txn *txn,
   return mdb_put(txn, sdbi, &key, &data, 0);
 }
 
-CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
+CAMLprim value ocaml_lmdb_put(value _env, value _max, value _max_entries,
+                              value _hashes)
 {
   CAMLparam2(_env, _hashes);
   CAMLlocal1(_data);
@@ -286,6 +311,7 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
   MDB_dbi dbi, sdbi;
   MDB_val key, data;
   uint64_t max = Long_val(_max);
+  uint64_t max_entries = Long_val(_max_entries);
   size_t hash_count = Wosize_val(_hashes);
   size_t total_entries = 0;
   size_t l, i, pos;
@@ -371,10 +397,21 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _hashes)
 
       rc = mdb_cursor_put(cursor, &key, &data, 0);
 
+      /* A hash present in too many distinct tracks, or holding too many
+       * entries overall, is non-discriminative: drop all its entries and
+       * mark it dead so it is never stored or looked up again. */
       if (rc == 0 && 0 < max) {
         uint64_t id_count;
         rc = count_hash_ids(cursor, hashes[l], &id_count);
         if (rc == 0 && max <= id_count) {
+          rc = mark_hash_as_saturated(cursor, txn, sdbi, hashes[l]);
+          break;
+        }
+      }
+      if (rc == 0 && 0 < max_entries) {
+        uint64_t entry_count;
+        rc = count_hash_entries(cursor, hashes[l], &entry_count);
+        if (rc == 0 && max_entries <= entry_count) {
           rc = mark_hash_as_saturated(cursor, txn, sdbi, hashes[l]);
           break;
         }
@@ -412,9 +449,9 @@ typedef struct {
   uint64_t bin;
 } stored_entry;
 
-CAMLprim value ocaml_lmdb_get(value _env, value _keys)
+CAMLprim value ocaml_lmdb_get(value _env, value _keys, value _max_entries)
 {
-  CAMLparam2(_env, _keys);
+  CAMLparam3(_env, _keys, _max_entries);
   CAMLlocal3(ans, tmp, entry);
   MDB_txn *txn = NULL;
   MDB_env *env = Env_val(_env);
@@ -423,6 +460,7 @@ CAMLprim value ocaml_lmdb_get(value _env, value _keys)
   MDB_val key, data;
   size_t key_count = Wosize_val(_keys);
   size_t entries_len = 0, entries_cap = 1024;
+  size_t max_entries = Long_val(_max_entries);
   size_t k, c, pos;
   int rc = 0;
 
@@ -464,10 +502,20 @@ CAMLprim value ocaml_lmdb_get(value _env, value _keys)
 
     ret = mdb_cursor_get(cursor, &key, &data, MDB_SET_RANGE);
 
+    /* Skip hashes with more than [max_entries] entries: a geometry shared
+     * across that many stored positions is non-discriminative and, left in,
+     * makes the per-frame vote counting blow up. 0 disables the cap. */
+    size_t start = entries_len;
+
     while (ret == 0) {
       uint64_t stored_key = *((uint64_t *)key.mv_data);
       if ((uint32_t)(stored_key >> 32) != hashes[k])
         break;
+      if (max_entries > 0 && counts[k] >= max_entries) {
+        entries_len = start;
+        counts[k] = 0;
+        break;
+      }
       if (entries_len == entries_cap) {
         entries_cap *= 2;
         stored_entry *grown =

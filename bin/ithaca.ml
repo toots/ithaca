@@ -73,6 +73,8 @@ let args =
         Args.b1_divisor_arg;
         Args.reassign_arg;
         Args.scheme_arg;
+        Args.quads_per_peak_arg;
+        Args.max_hash_entries_arg;
         Args.whitening_time_arg;
       ])
 

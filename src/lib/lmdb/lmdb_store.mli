@@ -20,4 +20,8 @@ exception Error of int
 
 val put_profile : string -> Profile_t.profile -> unit
 val get_profile : string -> Profile_t.profile
-val operations : string -> Db.operations
+
+(* [max_entries] bounds how many entries any single hash may hold: a hash
+   reaching it is dropped at store time and skipped at search time
+   (0 disables the limit). *)
+val operations : ?max_entries:int -> string -> Db.operations

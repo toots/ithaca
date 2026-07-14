@@ -28,6 +28,8 @@ val profile_arg : arg
 val b1_divisor_arg : arg
 val reassign_arg : arg
 val scheme_arg : arg
+val quads_per_peak_arg : arg
+val max_hash_entries_arg : arg
 val whitening_time_arg : arg
 val base64_profile : unit -> string
 val set_base64_profile : string -> unit

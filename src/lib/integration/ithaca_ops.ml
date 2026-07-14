@@ -15,8 +15,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *)
 
-let index_file ~ithaca_bin ~b1_divisor ~reassign ~scheme ~on_stage db_path file
-    id =
+let index_file ~ithaca_bin ~b1_divisor ~reassign ~scheme ~quads_per_peak
+    ~max_hash_entries ~on_stage db_path file id =
   let wav = Filename.temp_file "ithaca_idx" ".wav" in
   let opt_int name = function
     | None -> ""
@@ -38,11 +38,13 @@ let index_file ~ithaca_bin ~b1_divisor ~reassign ~scheme ~on_stage db_path file
       &&
       (on_stage "hashing";
        Shell.run_cmd
-         "%s -mode store %s%s%s-lmdb-path %s -i %s -id %d 2>/dev/null"
+         "%s -mode store %s%s%s%s%s-lmdb-path %s -i %s -id %d 2>/dev/null"
          (Filename.quote ithaca_bin)
          (opt_int "-b1-divisor" b1_divisor)
          (opt_flag "-reassign" reassign)
          (opt_string "-scheme" scheme)
+         (opt_int "-quads-per-peak" quads_per_peak)
+         (opt_int "-max-hash-entries" max_hash_entries)
          (Filename.quote db_path) (Filename.quote wav) id))
 
 let search_wav ~ithaca_bin db_path wav =

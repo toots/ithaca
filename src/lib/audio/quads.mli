@@ -19,15 +19,29 @@
    normalized into the unit box spanned by the two outer ones, quantized to
    a 32-bit hash. Invariant to pitch shifting on the log-frequency axis. *)
 
-(* Hash of a single quad: anchor, far corner, and two interior peaks. *)
-val hash : Hashes.peak -> Hashes.peak -> Hashes.peak -> Hashes.peak -> int
+(* Hash of a single quad: anchor, far corner, and two interior peaks.
+   [max_x] and [max_y] bound the box and set the scale for the box-dimension
+   component of the key. *)
+val hash :
+  max_x:int ->
+  max_y:int ->
+  Hashes.peak ->
+  Hashes.peak ->
+  Hashes.peak ->
+  Hashes.peak ->
+  int
+
+(* Default value of [max_quads_per_peak] when not given to [hashes]. *)
+val default_quads_per_peak : int
 
 (* Turn a peak stream into a quad hash stream. With [probes] (query side),
    components near a quantization-cell boundary also emit the adjacent
    cell's hash to tolerate boundary jitter; without (index side), exactly
-   one hash per quad. *)
+   one hash per quad. [max_quads_per_peak] caps how many quads each peak
+   anchors — the primary lever on hash density and database size. *)
 val hashes :
   ?probes:bool ->
+  ?max_quads_per_peak:int ->
   max_x:int ->
   max_y:int ->
   Hashes.peak list IStream.t ->

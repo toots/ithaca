@@ -1,6 +1,6 @@
 let interrupted = Atomic.make false
 let is_interrupted () = Atomic.get interrupted
-let default_pitch_semitones = [| 0.5; -0.5; 1.0; -1.0 |]
+let default_pitch_semitones = [| 0.5; -0.5; 1.0; -1.0; 1.5; -1.5; 2.0; -2.0 |]
 let exit_result = function `Pass | `Skip -> exit 0 | `Fail -> exit 1
 
 (* ── Index command ────────────────────────────────────────────────────────── *)
@@ -17,6 +17,8 @@ let cmd_index argv =
         b1_divisor = None;
         reassign = false;
         scheme = None;
+        quads_per_peak = None;
+        max_hash_entries = None;
         jobs = 0;
       }
   in
@@ -47,6 +49,12 @@ let cmd_index argv =
       ( "--scheme",
         Arg.String (fun s -> c := { !c with scheme = Some s }),
         "NAME  Hashing scheme: pairs (default) or quads" );
+      ( "--quads-per-peak",
+        Arg.Int (fun n -> c := { !c with quads_per_peak = Some n }),
+        "N  Quads scheme: max quads per peak (lower = smaller/faster DB)" );
+      ( "--max-hash-entries",
+        Arg.Int (fun n -> c := { !c with max_hash_entries = Some n }),
+        "N  Drop hashes exceeding this many entries (0 = no limit)" );
       ( "--jobs",
         Arg.Int (fun n -> c := { !c with jobs = n }),
         "N  Parallel jobs (default: Domain.recommended_domain_count ())" );
@@ -62,6 +70,8 @@ let cmd_index argv =
   if not (Sys.file_exists !c.audio_dir && Sys.is_directory !c.audio_dir) then (
     Printf.printf "SKIP: audio dir '%s' not found\n%!" !c.audio_dir;
     exit 0);
+  Printf.printf "Hashing scheme: %s\n%!"
+    (Option.value ~default:"pairs" !c.scheme);
   Index.run ~interrupted:is_interrupted !c
 
 (* ── Test command ─────────────────────────────────────────────────────────── *)
@@ -145,6 +155,10 @@ let cmd_test argv =
   if not (Sys.file_exists mpath) then (
     Printf.eprintf "Error: manifest %s not found — run 'index' first\n%!" mpath;
     exit 1);
+  (try
+     Printf.printf "Hashing scheme: %s\n%!"
+       (Lmdb_store.get_profile !c.db_path).Profile_t.scheme
+   with _ -> ());
   if !no_pitch then c := { !c with pitch_semitones = [||] };
   let entries = Manifest.read !c.db_path in
   Printf.printf "Loaded manifest: %d indexed files\n%!" (List.length entries);

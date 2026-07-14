@@ -23,6 +23,12 @@ type profile = {
   bins_per_octave: float;
   reassign: bool;
   ~scheme <ocaml default="\"pairs\"">: string;
+  (* Quads scheme only. [quads_per_peak] caps how many quads each peak may
+     anchor: the primary control on database size (linear) and, with it,
+     search cost. [max_hash_entries] is the ceiling past which a hash is
+     dropped as non-discriminative (0 = no ceiling). *)
+  ~quads_per_peak <ocaml default="6">: int;
+  ~max_hash_entries <ocaml default="0">: int;
   delta_x: float;
   delta_y: int;
   max_x: float;

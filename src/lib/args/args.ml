@@ -27,6 +27,8 @@ type profile = Profile_t.profile = {
   bins_per_octave : float;
   reassign : bool;
   scheme : string;
+  quads_per_peak : int;
+  max_hash_entries : int;
   delta_x : float;
   delta_y : int;
   max_x : float;
@@ -59,6 +61,8 @@ let profile =
       whitening_time = Audio.default_params.Audio.hashes_whitening_time;
       reassign = Audio.default_params.Audio.hashes_reassign;
       scheme = "pairs";
+      quads_per_peak = Audio.default_params.Audio.hashes_quads_per_peak;
+      max_hash_entries = 0;
       delta_x = Audio.default_params.Audio.peaks_delta_x;
       delta_y = Audio.default_params.Audio.peaks_delta_y;
       max_x = Audio.default_params.Audio.pairs_max_x;
@@ -142,15 +146,60 @@ let scheme_of_string = function
   | "quads" -> Audio.Quads
   | s -> failwith (Printf.sprintf "Invalid hashing scheme: %s" s)
 
+(* Quads produce fewer frames per query than pairs but each frame carries a
+   much stronger vote, so genuine matches clear a lower frame-count
+   threshold with a wide margin over unrelated tracks (which contribute one
+   frame per alignment). *)
+let quads_search_threshold = 4
+
+(* Quads share a small geometric hash space, so a common geometry accretes
+   entries across many tracks. Past this many, a hash is non-discriminative:
+   it is dropped at store time and skipped at search time. *)
+let quads_max_hash_entries = 256
+
 let scheme_arg =
   ( "-scheme",
     Arg.String
       (fun s ->
-        ignore (scheme_of_string s);
-        profile := { !profile with Profile_t.scheme = s }),
+        let search_threshold, max_hash_entries =
+          match scheme_of_string s with
+          | Audio.Quads -> (quads_search_threshold, quads_max_hash_entries)
+          | Audio.Pairs -> (!profile.Profile_t.search_threshold, 0)
+        in
+        profile :=
+          {
+            !profile with
+            Profile_t.scheme = s;
+            search_threshold;
+            max_hash_entries;
+          }),
     "Hashing scheme, one of: \"pairs\" (peak pairs, Fenet et al. 2011) or \
      \"quads\" (peak quads, Sonnleitner & Widmer 2016, robust to larger pitch \
      shifts). Default: \"pairs\"." )
+
+(* Database-size levers for the quads scheme. [-quads-per-peak] is the
+   primary control (linear in database size and search cost); lowering it
+   trades some pitch-shift recall margin for a smaller, faster database.
+   [-max-hash-entries] caps entries per hash, dropping over-common
+   geometries; it mainly bites at large corpora. *)
+let quads_per_peak_arg =
+  ( "-quads-per-peak",
+    Arg.Int (fun n -> profile := { !profile with Profile_t.quads_per_peak = n }),
+    Printf.sprintf
+      "Quads scheme: max quads anchored per peak (default: %d). Primary lever \
+       on database size and search cost; lower it for a smaller database at \
+       some recall cost."
+      Quads.default_quads_per_peak )
+
+let max_hash_entries_arg =
+  ( "-max-hash-entries",
+    Arg.Int
+      (fun n -> profile := { !profile with Profile_t.max_hash_entries = n }),
+    Printf.sprintf
+      "Drop any hash accumulating more than this many entries as \
+       non-discriminative (0 = no limit; default for quads: %d). Bounds \
+       database size and search cost at scale."
+      quads_max_hash_entries )
 
 let whitening_time_arg =
   ( "-whitening-time",
@@ -212,6 +261,7 @@ let audio_params () =
     hashes_bins_per_octave = !profile.bins_per_octave;
     hashes_reassign = !profile.reassign;
     hashes_scheme = scheme_of_string !profile.scheme;
+    hashes_quads_per_peak = !profile.quads_per_peak;
     peaks_delta_x = !profile.delta_x;
     peaks_delta_y = !profile.delta_y;
     pairs_max_x = !profile.max_x;
@@ -223,7 +273,9 @@ let audio_params () =
 let merger () : Audio.merger_mode = merger_of_string !profile.merger
 
 let lmdb_operations () =
-  let ops = Lmdb_store.operations !lmdb_path in
+  let ops =
+    Lmdb_store.operations ~max_entries:!profile.max_hash_entries !lmdb_path
+  in
   let first = ref true in
   let put max values =
     if !first then begin

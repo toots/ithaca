@@ -40,56 +40,95 @@ let min_dy = 4
 (* Number of interior peaks considered per (A, B) box: all C(k, 2) pairs
    are emitted so a single missing peak on the query side does not lose
    every quad of the box. *)
-let max_interior = 4
+let max_interior = 3
 
-(* Maximum quads emitted per incoming peak, to bound hash density. *)
-let max_quads_per_peak = 32
+(* Maximum quads emitted per incoming peak defaults to this but is a caller
+   parameter (see [hashes]): it dominates both database size and per-frame
+   search cost, so it is the primary knob for trading recall against size.
+   Recall comes from many boxes each contributing a few quads, not from one
+   box contributing many. *)
+let default_quads_per_peak = 6
 
-(* Quantization: [bits] per component, so a cell is 1/2^bits of the box
-   span. Coarse on purpose: whitening-state differences between the query
-   clip and the indexed track shift peaks by a bin or so, which moves a
-   normalized component by roughly 1/box-span. *)
-let bits = 5
+(* Quantization: [bits] per normalized component, so a cell is 1/2^bits of
+   the box span. Real pitch shifts (via a resampling shifter) move a
+   normalized coordinate by ~10% of the box span, not the ~0% a clean
+   log-frequency translation would, so cells are deliberately coarse: finer
+   cells simply never match across a shift. *)
+let bits = 4
 let cells_per_axis = 1 lsl bits
 
-(* Query-side tolerance: probe every cell intersecting [v - j, v + j]. *)
-let jitter = 0.04
+(* Query-side tolerance, as a fraction of a cell: a component within this
+   much of a cell boundary also probes the neighbouring cell (see
+   [probe_hashes]). *)
+let jitter = 0.5
 
 let quantize v =
   let q = int_of_float (v *. float cells_per_axis) in
   if q < 0 then 0 else if q > cells_per_axis - 1 then cells_per_axis - 1 else q
 
-let pack q1 q2 q3 q4 =
-  (((((q1 lsl bits) lor q2) lsl bits) lor q3) lsl bits) lor q4
+(* The box dimensions — width in frames, height in bins — are also part of
+   the key. Both are pitch invariant (a pitch shift translates every bin
+   equally, leaving bin differences unchanged, and does not move peaks in
+   time), so folding them in multiplies the key space without breaking
+   invariance. This keeps buckets sparse at scale, where the 4 interior
+   coordinates alone (16 bits) collide across unrelated tracks. Height is
+   quantised coarsely because peak jitter shifts it by a bin or two; width
+   is stable under pitch shift and quantised finer. *)
+let dx_bits = 4
+let dy_bits = 3
+
+let box_band v ~lo ~hi ~bits =
+  let n = 1 lsl bits in
+  let q = int_of_float (float (v - lo) /. float (max 1 (hi - lo)) *. float n) in
+  if q < 0 then 0 else if q >= n then n - 1 else q
+
+let box_bands ~max_x ~max_y (ax, ay) (bx, by) =
+  let min_dx = max 1 (max_x / min_dx_divisor) in
+  ( box_band (bx - ax) ~lo:min_dx ~hi:max_x ~bits:dx_bits,
+    box_band (abs (by - ay)) ~lo:min_dy ~hi:max_y ~bits:dy_bits )
+
+let pack ~dx_band ~dy_band q1 q2 q3 q4 =
+  let interior = (((((q1 lsl bits) lor q2) lsl bits) lor q3) lsl bits) lor q4 in
+  interior lor (dx_band lsl 16) lor (dy_band lsl (16 + dx_bits))
 
 let normalize (ax, ay) (bx, by) (px, py) =
   (float (px - ax) /. float (bx - ax), float (py - ay) /. float (by - ay))
 
-let hash a b c d =
+let hash ~max_x ~max_y a b c d =
   let cx, cy = normalize a b c in
   let dx, dy = normalize a b d in
-  pack (quantize cx) (quantize cy) (quantize dx) (quantize dy)
+  let dx_band, dy_band = box_bands ~max_x ~max_y a b in
+  pack ~dx_band ~dy_band (quantize cx) (quantize cy) (quantize dx) (quantize dy)
 
-(* All quantization cells a component may fall in on the reference side,
-   given the jitter allowance. *)
-let cells v =
-  let lo = quantize (v -. jitter) in
-  let hi = quantize (v +. jitter) in
-  List.init (hi - lo + 1) (fun i -> lo + i)
+(* The cell a component falls in, and the adjacent cell if it lies within
+   [jitter] of a boundary (else [None]). *)
+let axis_cell v =
+  let q = quantize v in
+  let frac = (v *. float cells_per_axis) -. floor (v *. float cells_per_axis) in
+  if frac < jitter && q > 0 then (q, Some (q - 1))
+  else if frac > 1. -. jitter && q < cells_per_axis - 1 then (q, Some (q + 1))
+  else (q, None)
 
-(* Hashes for all jitter-tolerant cell combinations. *)
-let probe_hashes a b c d =
+(* Query-side hashes: the exact cell plus, for each axis near a boundary,
+   the neighbour with only that axis shifted (Hamming-1 neighbourhood).
+   Bounded to at most 1 + 4 hashes per quad, versus the combinatorial
+   product of per-axis neighbours. Genuine matches drift on one axis at a
+   time far more often than on several at once, so this recovers most of
+   the recall of full neighbour probing at a fraction of the fan-out. *)
+let probe_hashes ~max_x ~max_y a b c d =
   let cx, cy = normalize a b c in
   let dx, dy = normalize a b d in
-  List.concat_map
-    (fun q1 ->
-      List.concat_map
-        (fun q2 ->
-          List.concat_map
-            (fun q3 -> List.map (fun q4 -> pack q1 q2 q3 q4) (cells dy))
-            (cells dx))
-        (cells cy))
-    (cells cx)
+  let dx_band, dy_band = box_bands ~max_x ~max_y a b in
+  let pack = pack ~dx_band ~dy_band in
+  let m0, n0 = axis_cell cx in
+  let m1, n1 = axis_cell cy in
+  let m2, n2 = axis_cell dx in
+  let m3, n3 = axis_cell dy in
+  let acc = [ pack m0 m1 m2 m3 ] in
+  let acc = match n0 with Some n -> pack n m1 m2 m3 :: acc | None -> acc in
+  let acc = match n1 with Some n -> pack m0 n m2 m3 :: acc | None -> acc in
+  let acc = match n2 with Some n -> pack m0 m1 n m3 :: acc | None -> acc in
+  match n3 with Some n -> pack m0 m1 m2 n :: acc | None -> acc
 
 let interior_pairs peaks =
   let rec take n = function
@@ -104,12 +143,16 @@ let interior_pairs peaks =
   in
   pairs peaks
 
-let hashes ?(probes = false) ~max_x ~max_y peaks =
+let hashes ?(probes = false) ?(max_quads_per_peak = default_quads_per_peak)
+    ~max_x ~max_y peaks =
   let buffer = ref [] in
   let queue = Queue.create () in
   let min_dx = max 1 (max_x / min_dx_divisor) in
   let emit ((ax, ay) as a) b c d =
-    let hashes = if probes then probe_hashes a b c d else [ hash a b c d ] in
+    let hashes =
+      if probes then probe_hashes ~max_x ~max_y a b c d
+      else [ hash ~max_x ~max_y a b c d ]
+    in
     List.iter
       (fun hash -> Queue.push { Hashes.pos = ax; hash; bin = ay } queue)
       hashes

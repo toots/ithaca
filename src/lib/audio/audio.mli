@@ -31,6 +31,7 @@ type audio_params = {
   hashes_bins_per_octave : float;
   hashes_reassign : bool;
   hashes_scheme : hash_scheme;
+  hashes_quads_per_peak : int;
   peaks_delta_x : float;
   peaks_delta_y : int;
   pairs_max_x : float;

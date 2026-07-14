@@ -24,6 +24,8 @@ type config = {
   b1_divisor : int option;
   reassign : bool;
   scheme : string option;
+  quads_per_peak : int option;
+  max_hash_entries : int option;
   jobs : int; (* 0 = auto *)
 }
 
@@ -87,7 +89,9 @@ let run ?(interrupted = fun () -> false) config =
               if
                 Ithaca_ops.index_file ~ithaca_bin:config.ithaca_bin
                   ~b1_divisor:config.b1_divisor ~reassign:config.reassign
-                  ~scheme:config.scheme ~on_stage config.db_path file id
+                  ~scheme:config.scheme ~quads_per_peak:config.quads_per_peak
+                  ~max_hash_entries:config.max_hash_entries ~on_stage
+                  config.db_path file id
               then begin
                 Atomic.incr n_indexed;
                 Mutex.lock indexed_mutex;
