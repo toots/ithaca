@@ -97,28 +97,8 @@ let print_time t =
 
 let get_hashes ?(probes = false) () =
   let params = Args.audio_params () in
-  let open_wav merger =
-    let wav = Wav.fopen !input_filename in
-    let hash = Audio.hash_wav ~merger ~params ~probes wav in
-    fun () ->
-      match hash () with
-      | Some value -> Some value
-      | None ->
-          Wav.close wav;
-          None
-  in
   let hashes =
-    match Args.merger () with
-    | Audio.Single merger -> open_wav merger
-    | Audio.Both ->
-        let wav = Wav.fopen !input_filename in
-        let is_mono = Wav.channels wav = 1 in
-        Wav.close wav;
-        if is_mono then open_wav Audio.mono_merger
-        else
-          Hashes.merge_parallel
-            (open_wav Audio.mono_merger)
-            (open_wav Audio.center_merger)
+    Store.hash_file ~probes ~merger:(Args.merger ()) ~params !input_filename
   in
   if !quiet then hashes
   else begin
@@ -146,12 +126,16 @@ let store () =
         let hashes = get_hashes () in
         let id = match !store_id with Some id -> id | None -> assert false in
         Printf.eprintf "Storing at ID: %i\n%!" id;
-        let fn { Db.insert } = insert [ (id, hashes) ] in
-        let operations =
-          if !output = `Json then Json_store.operations
-          else Args.lmdb_operations ()
-        in
-        make_store operations fn)
+        match !output with
+        | `Json ->
+            make_store Json_store.operations (fun { Db.insert } ->
+                insert [ (id, hashes) ])
+        | `Text ->
+            let db =
+              Store.open_db ~profile:(Args.get_profile ())
+                ~db_params:(Args.db_params ()) (Args.get_lmdb_path ())
+            in
+            Store.store db [ (id, hashes) ])
   in
   let ratio = Wav.duration wav /. processing_time in
   if not !quiet then Printf.eprintf "\n";

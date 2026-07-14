@@ -15,17 +15,14 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *)
 
-let search_wav ~ithaca_bin db_path wav =
-  let raw =
-    Shell.capture_cmd
-      (Printf.sprintf
-         "%s -mode search -lmdb-path %s -i %s -output json 2>/dev/null"
-         (Filename.quote ithaca_bin)
-         (Filename.quote db_path) (Filename.quote wav))
-  in
-  try Search_j.results_of_string (String.trim raw) with _ -> []
-
-let random_bits rng =
-  let a = Random.State.bits rng land 0xFFFF in
-  let b = Random.State.bits rng land 0xFFFF in
-  Printf.sprintf "%04x%04x" a b
+val load :
+  profile_of_string:(string -> Profile_t.profile) ->
+  batch_size:int ->
+  string ->
+  string list ->
+  unit
+(** [load ~profile_of_string ~batch_size db_path files] loads JSON hash files
+    into the database at [db_path] through a single open handle. Files whose
+    [.touch]/[.error] sibling already exists are skipped; a [.touch] is written
+    per stored file, a [.error] on parse failure. [profile_of_string] decodes
+    the profile embedded in each JSON. *)

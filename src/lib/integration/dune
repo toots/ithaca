@@ -1,4 +1,11 @@
 (library
  (name ithaca_integration)
  (wrapped false)
- (libraries ithaca_atd unix threads))
+ (libraries
+  ithaca_atd
+  ithaca_utils
+  ithaca_audio
+  ithaca_args
+  ithaca_store
+  unix
+  threads))

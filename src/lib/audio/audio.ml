@@ -99,8 +99,24 @@ let may_apply s = function
 
 let default_instruments = { cqt = None; peaks = None; pairs = None }
 
+let fcqt_params params =
+  {
+    Fcqt.min_freq = params.hashes_min_freq;
+    max_freq = params.hashes_max_freq;
+    bins_per_octave = params.hashes_bins_per_octave;
+    samplerate = float params.samplerate;
+    step = params.frame_step;
+    reassign = params.hashes_reassign;
+  }
+
+(* Build a reusable CQT processor (kernels + FFTW plans) for [params]. Callers
+   hashing many files with the same params build one and pass it to [hash_wav]
+   as [~fcqt] to avoid rebuilding it (and, across domains, to keep all
+   non-thread-safe FFTW planning on a single domain). *)
+let make_fcqt params = Fcqt.init (fcqt_params params)
+
 let hash_wav ?(instruments = default_instruments) ?(merger = mono_merger)
-    ?(params = default_params) ?(probes = false) wav =
+    ?(params = default_params) ?fcqt ?(probes = false) wav =
   let samplerate = float params.samplerate in
   let channels = Wav.channels wav in
   let convert, flush =
@@ -141,17 +157,13 @@ let hash_wav ?(instruments = default_instruments) ?(merger = mono_merger)
     else fun () ->
       match chunks () with Some pcm -> Some (merger pcm) | None -> None
   in
-  let cqt_params =
-    {
-      Fcqt.min_freq = params.hashes_min_freq;
-      max_freq = params.hashes_max_freq;
-      bins_per_octave = params.hashes_bins_per_octave;
-      samplerate;
-      step = params.frame_step;
-      reassign = params.hashes_reassign;
-    }
+  let fcqt =
+    match fcqt with
+    | Some fcqt ->
+        Fcqt.reset fcqt;
+        fcqt
+    | None -> make_fcqt params
   in
-  let fcqt = Fcqt.init cqt_params in
   let frames =
     Hashes.frames ~length:(Fcqt.sample_size fcqt) ~step:frame_step mono_chunks
   in

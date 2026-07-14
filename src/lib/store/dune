@@ -1,0 +1,10 @@
+(library
+ (name ithaca_store)
+ (wrapped false)
+ (libraries
+  ithaca_utils
+  ithaca_audio
+  ithaca_db
+  ithaca_lmdb
+  ithaca_json
+  ithaca_atd))

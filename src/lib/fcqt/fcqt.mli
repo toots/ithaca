@@ -30,6 +30,11 @@ type t
 exception Need_more_data
 
 val init : params -> t
+
+val reset : t -> unit
+(** Clear per-file transient state so the processor (plans + kernels) can be
+    reused for another file. *)
+
 val sample_size : t -> int
 
 val execute_frame : t -> float array -> frame

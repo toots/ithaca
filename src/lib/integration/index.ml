@@ -17,7 +17,6 @@
 
 type config = {
   ithaca_bin : string;
-  json_store_bin : string;
   audio_dir : string;
   db_path : string;
   max_duration : float;
@@ -30,9 +29,9 @@ type config = {
   jobs : int; (* 0 = auto *)
 }
 
-(* A file hashed to JSON by a hashing worker, awaiting storage. *)
+(* A file hashed by a hashing worker, awaiting storage. *)
 type queued = {
-  json_path : string;
+  hashes : Hashes.t;
   file : string;
   id : int;
   dur : float;
@@ -70,6 +69,21 @@ let run ?(interrupted = fun () -> false) config =
       "Indexing %d files (%d hashing workers + 1 store worker)...\n%!" n_files
       n_hashers;
 
+    (* Configure the hashing profile from [config] exactly as the CLI flags do
+       (order matters: -scheme sets the quads default max_hash_entries, which an
+       explicit -max-hash-entries then overrides). *)
+    Option.iter Args.set_b1_divisor config.b1_divisor;
+    if config.reassign then Args.set_reassign ();
+    Option.iter Args.set_scheme config.scheme;
+    Option.iter Args.set_quads_per_peak config.quads_per_peak;
+    Option.iter Args.set_max_hash_entries config.max_hash_entries;
+    let params = Args.audio_params () in
+    let merger = Args.merger () in
+
+    (* One reusable CQT processor per hashing worker, built up front on this
+       domain so the non-thread-safe FFTW planning never runs concurrently. *)
+    let procs = Array.init n_hashers (fun _ -> Store.make_processor params) in
+
     let n_indexed = Atomic.make 0 in
     let n_done = Atomic.make 0 in
     let stats_mutex = Mutex.create () in
@@ -99,9 +113,10 @@ let run ?(interrupted = fun () -> false) config =
         (Stats.bytes_per_second db audio)
     in
 
-    (* One of [n_hashers] workers: hash a file to JSON and enqueue it, without
-       touching the database. *)
+    (* One of [n_hashers] workers: decode and hash a file in-process (reusing
+       its dedicated processor) and enqueue the hashes. *)
     let hasher domain_idx () =
+      let fcqt = procs.(domain_idx) in
       let rec loop () =
         if interrupted () then ()
         else begin
@@ -124,26 +139,32 @@ let run ?(interrupted = fun () -> false) config =
                      (Progress.shorten 40 (Filename.basename file))
                      stage)
               in
-              let json_path = Filename.temp_file "ithaca_json" ".json" in
+              let wav = Filename.temp_file "ithaca_idx" ".wav" in
               let t0 = Unix.gettimeofday () in
-              let ok =
-                Ithaca_ops.hash_to_json ~ithaca_bin:config.ithaca_bin
-                  ~b1_divisor:config.b1_divisor ~reassign:config.reassign
-                  ~scheme:config.scheme ~quads_per_peak:config.quads_per_peak
-                  ~max_hash_entries:config.max_hash_entries ~on_stage ~json_path
-                  file id
+              let hashes =
+                Fun.protect
+                  ~finally:(fun () -> try Sys.remove wav with _ -> ())
+                  (fun () ->
+                    on_stage "converting";
+                    if not (Ffmpeg.to_wav file wav) then None
+                    else begin
+                      on_stage "hashing";
+                      (* Pull the stream here so all hashing (and the WAV read)
+                         happens before the temp file is removed. *)
+                      Some
+                        (IStream.make
+                           (IStream.pull
+                              (Store.hash_file ~fcqt ~merger ~params wav)))
+                    end)
               in
               let hash_time = Unix.gettimeofday () -. t0 in
-              if ok then begin
-                Mutex.lock q_mutex;
-                Queue.add { json_path; file; id; dur; hash_time } queue;
-                Condition.signal q_cond;
-                Mutex.unlock q_mutex
-              end
-              else begin
-                (try Sys.remove json_path with _ -> ());
-                Atomic.incr n_done
-              end
+              match hashes with
+              | Some hashes ->
+                  Mutex.lock q_mutex;
+                  Queue.add { hashes; file; id; dur; hash_time } queue;
+                  Condition.signal q_cond;
+                  Mutex.unlock q_mutex
+              | None -> Atomic.incr n_done
             end;
             loop ()
           end
@@ -157,10 +178,14 @@ let run ?(interrupted = fun () -> false) config =
       Mutex.unlock q_mutex
     in
 
-    (* Sole store worker: drain the queue and load batches with
-       ithaca_json_store, which serializes the single LMDB writer. It owns the
-       live stats header — it is the one that sees the database grow. *)
+    (* Sole store worker: drain the queue and insert batches through one open
+       database handle (the single LMDB writer). It owns the live stats header —
+       it is the one that sees the database grow. *)
     let store_idx = n_hashers in
+    let db =
+      Store.open_db ~profile:(Args.get_profile ())
+        ~db_params:(Args.db_params ()) config.db_path
+    in
     let store_worker () =
       let rec loop () =
         Mutex.lock q_mutex;
@@ -177,27 +202,16 @@ let run ?(interrupted = fun () -> false) config =
         | batch ->
             Progress.update_job prog store_idx
               (Printf.sprintf "storing %d file(s)" (List.length batch));
-            ignore
-              (Ithaca_ops.store_json ~json_store_bin:config.json_store_bin
-                 ~db_path:config.db_path
-                 (List.map (fun r -> r.json_path) batch));
-            (* ithaca_json_store writes a .touch sibling per stored file and a
-               .error sibling on failure. *)
+            Store.store db (List.map (fun r -> (r.id, r.hashes)) batch);
             List.iter
               (fun r ->
-                let base = Filename.remove_extension r.json_path in
-                if Sys.file_exists (base ^ ".touch") then begin
-                  Atomic.incr n_indexed;
-                  Mutex.lock stats_mutex;
-                  indexed_entries := (r.file, r.id) :: !indexed_entries;
-                  total_audio := !total_audio +. r.dur;
-                  total_index_time := !total_index_time +. r.hash_time;
-                  Mutex.unlock stats_mutex
-                end;
+                Atomic.incr n_indexed;
                 Atomic.incr n_done;
-                (try Sys.remove r.json_path with _ -> ());
-                (try Sys.remove (base ^ ".touch") with _ -> ());
-                try Sys.remove (base ^ ".error") with _ -> ())
+                Mutex.lock stats_mutex;
+                indexed_entries := (r.file, r.id) :: !indexed_entries;
+                total_audio := !total_audio +. r.dur;
+                total_index_time := !total_index_time +. r.hash_time;
+                Mutex.unlock stats_mutex)
               batch;
             let audio, itime =
               Mutex.lock stats_mutex;

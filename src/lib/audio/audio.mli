@@ -51,12 +51,18 @@ type instruments = {
   pairs : (Hashes.peak * Hashes.peak) list instrument;
 }
 
+val make_fcqt : audio_params -> Fcqt.t
+(** Build a reusable CQT processor (kernels + FFTW plans) for [params], to pass
+    to [hash_wav] as [~fcqt] when hashing many files with the same params. *)
+
 (* [probes] enables quantization-boundary probing in the quads scheme and
-   should be set on the query (search) side only. *)
+   should be set on the query (search) side only. [fcqt], when given, is reused
+   (reset) instead of building a fresh processor. *)
 val hash_wav :
   ?instruments:instruments ->
   ?merger:channel_merger ->
   ?params:audio_params ->
+  ?fcqt:Fcqt.t ->
   ?probes:bool ->
   Wav.t ->
   Hashes.t

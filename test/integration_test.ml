@@ -10,7 +10,6 @@ let cmd_index argv =
     Index.
       {
         ithaca_bin = Paths.ithaca;
-        json_store_bin = Paths.json_store;
         audio_dir = "";
         db_path = "";
         max_duration = 1200.0;

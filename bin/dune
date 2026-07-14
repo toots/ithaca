@@ -9,5 +9,6 @@
   ithaca_search
   ithaca_lmdb
   ithaca_json
+  ithaca_store
   ithaca_args
   unix))

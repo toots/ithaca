@@ -99,6 +99,7 @@ let set_profile p =
     }
 
 let default_profile = ref true
+let get_profile () = !profile
 
 let set_json_profile arg =
   default_profile := false;
@@ -125,19 +126,22 @@ let set_base64_profile data =
        (Cryptokit.transform_string (Cryptokit.Base64.decode ()) data))
 
 let b1_divisor = ref Audio.default_params.Audio.hashes_b1_divisor
+let set_b1_divisor n = b1_divisor := n
 
 let b1_divisor_arg =
   ( "-b1-divisor",
-    Arg.Int (fun n -> b1_divisor := n),
+    Arg.Int set_b1_divisor,
     Printf.sprintf
       "Divisor for b̂₁ = ⌊b1/N⌋ in the hash (default: %d). Larger values give \
        coarser hash granularity: more pitch-shift tolerance per variant but \
        also more hash collisions across songs."
       !b1_divisor )
 
+let set_reassign () = profile := { !profile with Profile_t.reassign = true }
+
 let reassign_arg =
   ( "-reassign",
-    Arg.Unit (fun () -> profile := { !profile with Profile_t.reassign = true }),
+    Arg.Unit set_reassign,
     "Enable frequency reassignment for sharper peak positions (slower, \
      disabled by default)." )
 
@@ -157,22 +161,18 @@ let quads_search_threshold = 4
    it is dropped at store time and skipped at search time. *)
 let quads_max_hash_entries = 256
 
+let set_scheme s =
+  let search_threshold, max_hash_entries =
+    match scheme_of_string s with
+    | Audio.Quads -> (quads_search_threshold, quads_max_hash_entries)
+    | Audio.Pairs -> (!profile.Profile_t.search_threshold, 0)
+  in
+  profile :=
+    { !profile with Profile_t.scheme = s; search_threshold; max_hash_entries }
+
 let scheme_arg =
   ( "-scheme",
-    Arg.String
-      (fun s ->
-        let search_threshold, max_hash_entries =
-          match scheme_of_string s with
-          | Audio.Quads -> (quads_search_threshold, quads_max_hash_entries)
-          | Audio.Pairs -> (!profile.Profile_t.search_threshold, 0)
-        in
-        profile :=
-          {
-            !profile with
-            Profile_t.scheme = s;
-            search_threshold;
-            max_hash_entries;
-          }),
+    Arg.String set_scheme,
     "Hashing scheme, one of: \"pairs\" (peak pairs, Fenet et al. 2011) or \
      \"quads\" (peak quads, Sonnleitner & Widmer 2016, robust to larger pitch \
      shifts). Default: \"pairs\"." )
@@ -182,19 +182,24 @@ let scheme_arg =
    trades some pitch-shift recall margin for a smaller, faster database.
    [-max-hash-entries] caps entries per hash, dropping over-common
    geometries; it mainly bites at large corpora. *)
+let set_quads_per_peak n =
+  profile := { !profile with Profile_t.quads_per_peak = n }
+
 let quads_per_peak_arg =
   ( "-quads-per-peak",
-    Arg.Int (fun n -> profile := { !profile with Profile_t.quads_per_peak = n }),
+    Arg.Int set_quads_per_peak,
     Printf.sprintf
       "Quads scheme: max quads anchored per peak (default: %d). Primary lever \
        on database size and search cost; lower it for a smaller database at \
        some recall cost."
       Quads.default_quads_per_peak )
 
+let set_max_hash_entries n =
+  profile := { !profile with Profile_t.max_hash_entries = n }
+
 let max_hash_entries_arg =
   ( "-max-hash-entries",
-    Arg.Int
-      (fun n -> profile := { !profile with Profile_t.max_hash_entries = n }),
+    Arg.Int set_max_hash_entries,
     Printf.sprintf
       "Drop any hash accumulating more than this many entries as \
        non-discriminative (0 = no limit; default for quads: %d). Bounds \
@@ -211,6 +216,7 @@ let whitening_time_arg =
       Audio.default_params.Audio.hashes_whitening_time )
 
 let lmdb_path = ref "./ithaca.db"
+let get_lmdb_path () = !lmdb_path
 
 let store_arg =
   ( "-lmdb-path",

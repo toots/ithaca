@@ -71,7 +71,7 @@ type t = {
   t_matrix : kernel array;
   f_matrix : kernel array;
   cached_steps : int;
-  deferred : float array Ringbuffer.t;
+  mutable deferred : float array Ringbuffer.t;
   f_of_pos : float array;
   fft : float array -> unit;
   fft_re : float array;
@@ -170,6 +170,14 @@ let init params =
     fft_size = n_max;
     cached = 0;
   }
+
+(* Clear the per-file transient state so the processor (plans + kernels) can be
+   reused for the next file without rebuilding. *)
+let reset t =
+  t.cached <- 0;
+  t.deferred <-
+    Ringbuffer.init
+      (Array.init t.cached_steps (fun _ -> Array.make t.cqt_size 0.))
 
 let reassign ~fcqt ~t_data ~f_data data =
   let process n d =
