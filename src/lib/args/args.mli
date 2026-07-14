@@ -17,6 +17,9 @@
 
 type arg = Arg.key * Arg.spec * Arg.doc
 
+val quads_max_hash_entries : int
+(** Default [-max-hash-entries] value applied to the quads scheme. *)
+
 val parse :
   ?allow_anon:bool ->
   args:(Arg.key * Arg.spec * Arg.doc) list ->

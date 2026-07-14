@@ -26,4 +26,11 @@
 
 (executable
  (name integration_test)
- (libraries ithaca_atd ithaca_integration ithaca_lmdb unix threads.posix))
+ (libraries
+  ithaca_atd
+  ithaca_audio
+  ithaca_args
+  ithaca_integration
+  ithaca_lmdb
+  unix
+  threads.posix))

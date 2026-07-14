@@ -42,22 +42,31 @@ let cmd_index argv =
         "N  Limit number of files to index (default: no limit)" );
       ( "--b1-divisor",
         Arg.Int (fun n -> c := { !c with b1_divisor = Some n }),
-        "N  Divisor for b̂₁ in the hash (default: ithaca's default)" );
+        Printf.sprintf "N  Divisor for b̂₁ in the hash (default: %d)"
+          Audio.default_params.Audio.hashes_b1_divisor );
       ( "--reassign",
         Arg.Unit (fun () -> c := { !c with reassign = true }),
-        "  Enable frequency reassignment (sharper peaks, ~6x slower)" );
+        "  Enable frequency reassignment (sharper peaks, ~6x slower; default: \
+         off)" );
       ( "--scheme",
         Arg.String (fun s -> c := { !c with scheme = Some s }),
         "NAME  Hashing scheme: pairs (default) or quads" );
       ( "--quads-per-peak",
         Arg.Int (fun n -> c := { !c with quads_per_peak = Some n }),
-        "N  Quads scheme: max quads per peak (lower = smaller/faster DB)" );
+        Printf.sprintf
+          "N  Quads scheme: max quads per peak (lower = smaller/faster DB; \
+           default: %d)"
+          Quads.default_quads_per_peak );
       ( "--max-hash-entries",
         Arg.Int (fun n -> c := { !c with max_hash_entries = Some n }),
-        "N  Drop hashes exceeding this many entries (0 = no limit)" );
+        Printf.sprintf
+          "N  Drop hashes exceeding this many entries (0 = no limit; default \
+           for quads: %d)"
+          Args.quads_max_hash_entries );
       ( "--jobs",
         Arg.Int (fun n -> c := { !c with jobs = n }),
-        "N  Parallel jobs (default: Domain.recommended_domain_count ())" );
+        Printf.sprintf "N  Parallel jobs (default: %d)"
+          (Domain.recommended_domain_count ()) );
     ]
   in
   Arg.parse_argv argv args (fun _ -> ()) "integration_test index [options]";
@@ -71,21 +80,27 @@ let cmd_index argv =
     Printf.printf "SKIP: audio dir '%s' not found\n%!" !c.audio_dir;
     exit 0);
   let scheme = Option.value ~default:"pairs" !c.scheme in
-  let opt name = Option.map (Printf.sprintf "%s=%d" name) in
-  let params =
-    List.filter_map Fun.id
-      [
-        opt "b1-divisor" !c.b1_divisor;
-        (if scheme = "quads" then opt "quads-per-peak" !c.quads_per_peak
-         else None);
-        (if scheme = "quads" then opt "max-hash-entries" !c.max_hash_entries
-         else None);
-        (if !c.reassign then Some "reassign=true" else None);
-      ]
+  (* Resolve unset options to the same defaults the ithaca binary would use, so
+     the effective params are always visible. *)
+  let b1 =
+    Option.value ~default:Audio.default_params.Audio.hashes_b1_divisor
+      !c.b1_divisor
   in
-  Printf.printf "Hashing scheme: %s%s\n%!" scheme
-    (if params = [] then ""
-     else Printf.sprintf " (%s)" (String.concat ", " params));
+  let params =
+    [ Printf.sprintf "b1-divisor=%d" b1 ]
+    @ (if scheme = "quads" then
+         [
+           Printf.sprintf "quads-per-peak=%d"
+             (Option.value ~default:Quads.default_quads_per_peak
+                !c.quads_per_peak);
+           Printf.sprintf "max-hash-entries=%d"
+             (Option.value ~default:Args.quads_max_hash_entries
+                !c.max_hash_entries);
+         ]
+       else [])
+    @ [ Printf.sprintf "reassign=%b" !c.reassign ]
+  in
+  Printf.printf "Hashing scheme: %s (%s)\n%!" scheme (String.concat ", " params);
   Index.run ~interrupted:is_interrupted !c
 
 (* ── Test command ─────────────────────────────────────────────────────────── *)
@@ -140,7 +155,8 @@ let cmd_test argv =
          temporary)" );
       ( "--jobs",
         Arg.Int (fun n -> c := { !c with jobs = n }),
-        "N  Parallel jobs (default: Domain.recommended_domain_count ())" );
+        Printf.sprintf "N  Parallel jobs (default: %d)"
+          (Domain.recommended_domain_count ()) );
       ( "--samples",
         Arg.Int (fun n -> c := { !c with samples = n }),
         "N  Files to sample (default 50)" );
