@@ -70,8 +70,22 @@ let cmd_index argv =
   if not (Sys.file_exists !c.audio_dir && Sys.is_directory !c.audio_dir) then (
     Printf.printf "SKIP: audio dir '%s' not found\n%!" !c.audio_dir;
     exit 0);
-  Printf.printf "Hashing scheme: %s\n%!"
-    (Option.value ~default:"pairs" !c.scheme);
+  let scheme = Option.value ~default:"pairs" !c.scheme in
+  let opt name = Option.map (Printf.sprintf "%s=%d" name) in
+  let params =
+    List.filter_map Fun.id
+      [
+        opt "b1-divisor" !c.b1_divisor;
+        (if scheme = "quads" then opt "quads-per-peak" !c.quads_per_peak
+         else None);
+        (if scheme = "quads" then opt "max-hash-entries" !c.max_hash_entries
+         else None);
+        (if !c.reassign then Some "reassign=true" else None);
+      ]
+  in
+  Printf.printf "Hashing scheme: %s%s\n%!" scheme
+    (if params = [] then ""
+     else Printf.sprintf " (%s)" (String.concat ", " params));
   Index.run ~interrupted:is_interrupted !c
 
 (* ── Test command ─────────────────────────────────────────────────────────── *)
@@ -156,8 +170,15 @@ let cmd_test argv =
     Printf.eprintf "Error: manifest %s not found — run 'index' first\n%!" mpath;
     exit 1);
   (try
-     Printf.printf "Hashing scheme: %s\n%!"
-       (Lmdb_store.get_profile !c.db_path).Profile_t.scheme
+     let p = Lmdb_store.get_profile !c.db_path in
+     let params =
+       if p.Profile_t.scheme = "quads" then
+         Printf.sprintf "quads-per-peak=%d, max-hash-entries=%d, reassign=%b"
+           p.Profile_t.quads_per_peak p.Profile_t.max_hash_entries
+           p.Profile_t.reassign
+       else Printf.sprintf "reassign=%b" p.Profile_t.reassign
+     in
+     Printf.printf "Hashing scheme: %s (%s)\n%!" p.Profile_t.scheme params
    with _ -> ());
   if !no_pitch then c := { !c with pitch_semitones = [||] };
   let entries = Manifest.read !c.db_path in
