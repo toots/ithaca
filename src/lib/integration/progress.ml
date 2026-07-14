@@ -27,18 +27,38 @@
 let shorten n s =
   if String.length s > n then String.sub s 0 (n - 3) ^ "..." else s
 
-type t = { jobs : int; mutex : Mutex.t }
+type t = { jobs : int; header_lines : int; mutex : Mutex.t }
 
-let create jobs =
-  Printf.eprintf "\n%!";
-  for _ = 0 to jobs - 1 do
+let create ?(header_lines = 1) jobs =
+  for _ = 1 to header_lines + jobs do
     Printf.eprintf "\n%!"
   done;
-  { jobs; mutex = Mutex.create () }
+  { jobs; header_lines; mutex = Mutex.create () }
 
+(* [msg] may contain newlines; each line fills one reserved header row. *)
 let update_header t msg =
+  let lines = Array.of_list (String.split_on_char '\n' msg) in
   Mutex.lock t.mutex;
-  Printf.eprintf "\027[%dA\r\027[2K  %s\027[%dB%!" (t.jobs + 1) msg (t.jobs + 1);
+  Printf.eprintf "\027[%dA" (t.header_lines + t.jobs);
+  for i = 0 to t.header_lines - 1 do
+    let line = if i < Array.length lines then lines.(i) else "" in
+    Printf.eprintf "\r\027[2K  %s" line;
+    if i < t.header_lines - 1 then Printf.eprintf "\n"
+  done;
+  Printf.eprintf "\027[%dB\r%!" (t.jobs + 1);
+  Mutex.unlock t.mutex
+
+(* Erase the whole reserved block and leave the cursor at its top row, so
+   subsequent output starts clean. *)
+let clear t =
+  let total = t.header_lines + t.jobs in
+  Mutex.lock t.mutex;
+  Printf.eprintf "\027[%dA" total;
+  for i = 0 to total do
+    Printf.eprintf "\r\027[2K";
+    if i < total then Printf.eprintf "\027[1B"
+  done;
+  Printf.eprintf "\027[%dA\r%!" total;
   Mutex.unlock t.mutex
 
 let update_job t domain_idx msg =

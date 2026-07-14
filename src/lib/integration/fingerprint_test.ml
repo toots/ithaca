@@ -63,6 +63,38 @@ let run ?(interrupted = fun () -> false) config entries =
   let basic_tested = Atomic.make 0 in
   let sfx_identified = Atomic.make 0 in
   let sfx_tested = Atomic.make 0 in
+  let has_sfx = Array.length sfx_arr > 0 in
+  let n_pitch = Array.length pitch_results in
+
+  (* Summed per-search wall time and the audio it covered, for the live
+     "Nx realtime" search-speed figure. Each search runs on a clip of
+     [clip_duration] seconds. *)
+  let stats_mutex = Mutex.create () in
+  let total_search_time = ref 0.0 in
+  let n_searches () =
+    Atomic.get basic_tested + Atomic.get sfx_tested
+    + Array.fold_left
+        (fun acc (_, pr) -> acc + Atomic.get pr.tested)
+        0 pitch_results
+  in
+  let search_realtime () =
+    let audio_s = float (n_searches ()) *. config.clip_duration in
+    Mutex.lock stats_mutex;
+    let wall_s = !total_search_time in
+    Mutex.unlock stats_mutex;
+    Stats.realtime ~audio_s ~wall_s
+  in
+  let search clip =
+    let t0 = Unix.gettimeofday () in
+    let r =
+      Ithaca_ops.search_wav ~ithaca_bin:config.ithaca_bin config.db_path clip
+    in
+    let dt = Unix.gettimeofday () -. t0 in
+    Mutex.lock stats_mutex;
+    total_search_time := !total_search_time +. dt;
+    Mutex.unlock stats_mutex;
+    r
+  in
   let margin = 5.0 in
   let min_usable_dur = config.clip_duration +. (2.0 *. margin) in
 
@@ -83,8 +115,40 @@ let run ?(interrupted = fun () -> false) config entries =
 
   let test_n_done = Atomic.make 0 in
   let clip_counter = Atomic.make 0 in
-  let prog = Progress.create jobs in
+  let header_lines =
+    1 (* files tested *) + 1 (* basic *)
+    + (if has_sfx then 1 else 0)
+    + (if n_pitch > 0 then 1 + n_pitch else 0)
+    + 1 (* search speed *)
+  in
+  let prog = Progress.create ~header_lines jobs in
   let test_cursor = Atomic.make 0 in
+
+  let render_stats () =
+    let b = Buffer.create 256 in
+    Buffer.add_string b
+      (Printf.sprintf "[%d/%d] files tested" (Atomic.get test_n_done) n_test);
+    let bi = Atomic.get basic_identified and bt = Atomic.get basic_tested in
+    Buffer.add_string b
+      (Printf.sprintf "\nBasic: %d / %d (%.1f%%)" bi bt (pct bi bt));
+    if has_sfx then begin
+      let si = Atomic.get sfx_identified and st = Atomic.get sfx_tested in
+      Buffer.add_string b
+        (Printf.sprintf "\nSFX:   %d / %d (%.1f%%)" si st (pct si st))
+    end;
+    if n_pitch > 0 then begin
+      Buffer.add_string b "\nPitch-shifted:";
+      Array.iter
+        (fun (st, pr) ->
+          let ti = Atomic.get pr.identified and tt = Atomic.get pr.tested in
+          Buffer.add_string b
+            (Printf.sprintf "\n  %+.2f st: %d / %d (%.1f%%)" st ti tt
+               (pct ti tt)))
+        pitch_results
+    end;
+    Buffer.add_string b (Printf.sprintf "\nSearch: %s" (search_realtime ()));
+    Buffer.contents b
+  in
 
   let worker domain_idx () =
     let rng = Random.State.make_self_init () in
@@ -115,16 +179,14 @@ let run ?(interrupted = fun () -> false) config entries =
               show "extracting";
               if Ffmpeg.extract_clip file clip start config.clip_duration then begin
                 show "searching";
-                let results =
-                  Ithaca_ops.search_wav ~ithaca_bin:config.ithaca_bin
-                    config.db_path clip
-                in
+                let results = search clip in
                 Atomic.incr basic_tested;
                 (match results with
                 | { Search_t.id = s; _ } :: _ when int_of_string_opt s = Some id
                   ->
                     Atomic.incr basic_identified
                 | _ -> ());
+                Progress.update_header prog (render_stats ());
                 if Array.length sfx_arr > 0 then begin
                   let sfx =
                     sfx_arr.(Random.State.int rng (Array.length sfx_arr))
@@ -147,16 +209,14 @@ let run ?(interrupted = fun () -> false) config entries =
                       ~sfx_lufs:config.sfx_mixed_lufs clip sfx mixed
                   then begin
                     show "searching sfx";
-                    let results =
-                      Ithaca_ops.search_wav ~ithaca_bin:config.ithaca_bin
-                        config.db_path mixed
-                    in
+                    let results = search mixed in
                     Atomic.incr sfx_tested;
                     (match results with
                     | { Search_t.id = s; _ } :: _
                       when int_of_string_opt s = Some id ->
                         Atomic.incr sfx_identified
                     | _ -> ());
+                    Progress.update_header prog (render_stats ());
                     if config.samples_dir = "" then
                       try Sys.remove mixed with _ -> ()
                   end
@@ -174,16 +234,14 @@ let run ?(interrupted = fun () -> false) config entries =
                         (Filename.quote clip) (Filename.quote shifted) semitones
                     then begin
                       show (Printf.sprintf "searching pitch %+.2f" semitones);
-                      let results =
-                        Ithaca_ops.search_wav ~ithaca_bin:config.ithaca_bin
-                          config.db_path shifted
-                      in
+                      let results = search shifted in
                       Atomic.incr pr.tested;
                       (match results with
                       | { Search_t.id = s; _ } :: _
                         when int_of_string_opt s = Some id ->
                           Atomic.incr pr.identified
                       | _ -> ());
+                      Progress.update_header prog (render_stats ());
                       if config.samples_dir = "" then
                         try Sys.remove shifted with _ -> ()
                     end)
@@ -194,21 +252,20 @@ let run ?(interrupted = fun () -> false) config entries =
             done
           end;
           Atomic.incr test_n_done;
-          Progress.update_header prog
-            (Printf.sprintf "[%d/%d] files tested" (Atomic.get test_n_done)
-               n_test);
+          Progress.update_header prog (render_stats ());
           loop ()
         end
       end
     in
     loop ()
   in
+  Progress.update_header prog (render_stats ());
   let workers =
     Array.init (jobs - 1) (fun i -> Domain.spawn (worker (i + 1)))
   in
   worker 0 ();
   Array.iter Domain.join workers;
-  Printf.eprintf "\r\027[2K%!";
+  Progress.clear prog;
 
   Printf.printf "=== Integration test results ===\n\n";
   Printf.printf "Database:       %s\n" config.db_path;
@@ -236,7 +293,7 @@ let run ?(interrupted = fun () -> false) config entries =
           identified tested (pct identified tested))
       pitch_results
   end;
-  Printf.printf "\n%!";
+  Printf.printf "\nSearch speed: %s\n%!" (search_realtime ());
 
   let t = Atomic.get basic_tested in
   if t = 0 then `Skip

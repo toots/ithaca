@@ -58,6 +58,10 @@ let run ?(interrupted = fun () -> false) config =
     let n_done = Atomic.make 0 in
     let indexed_mutex = Mutex.create () in
     let indexed_entries = ref [] in
+    let total_audio = ref 0.0 in
+    (* seconds of audio actually indexed *)
+    let total_index_time = ref 0.0 in
+    (* summed per-file indexing wall time *)
     let prog = Progress.create jobs in
 
     let items =
@@ -86,23 +90,38 @@ let run ?(interrupted = fun () -> false) config =
                      (Progress.shorten 40 (Filename.basename file))
                      stage)
               in
-              if
+              let t0 = Unix.gettimeofday () in
+              let ok =
                 Ithaca_ops.index_file ~ithaca_bin:config.ithaca_bin
                   ~b1_divisor:config.b1_divisor ~reassign:config.reassign
                   ~scheme:config.scheme ~quads_per_peak:config.quads_per_peak
                   ~max_hash_entries:config.max_hash_entries ~on_stage
                   config.db_path file id
-              then begin
+              in
+              let index_time = Unix.gettimeofday () -. t0 in
+              if ok then begin
                 Atomic.incr n_indexed;
                 Mutex.lock indexed_mutex;
                 indexed_entries := (file, id) :: !indexed_entries;
+                total_audio := !total_audio +. dur;
+                total_index_time := !total_index_time +. index_time;
                 Mutex.unlock indexed_mutex
               end
             end;
             Atomic.incr n_done;
+            let audio, itime =
+              Mutex.lock indexed_mutex;
+              let a = !total_audio and i = !total_index_time in
+              Mutex.unlock indexed_mutex;
+              (a, i)
+            in
+            let db = Stats.disk_bytes config.db_path in
             Progress.update_header prog
-              (Printf.sprintf "[%d/%d] files indexed" (Atomic.get n_done)
-                 n_files);
+              (Printf.sprintf "[%d/%d] indexed · %s · db %s (%s)"
+                 (Atomic.get n_done) n_files
+                 (Stats.realtime ~audio_s:audio ~wall_s:itime)
+                 (Stats.human_bytes db)
+                 (Stats.bytes_per_second db audio));
             loop ()
           end
         end
@@ -114,8 +133,15 @@ let run ?(interrupted = fun () -> false) config =
     in
     worker 0 ();
     Array.iter Domain.join workers;
-    Printf.eprintf "\r\027[2K  done: %d/%d files indexed.\n\n%!"
-      (Atomic.get n_indexed) n_files;
+    Progress.clear prog;
+    Printf.printf "Indexed %d/%d files.\n" (Atomic.get n_indexed) n_files;
+    if !total_audio > 0.0 then begin
+      let db = Stats.disk_bytes config.db_path in
+      Printf.printf "Indexing speed: %s\n"
+        (Stats.realtime ~audio_s:!total_audio ~wall_s:!total_index_time);
+      Printf.printf "Database size:  %s (%s)\n" (Stats.human_bytes db)
+        (Stats.bytes_per_second db !total_audio)
+    end;
 
     let sorted =
       List.sort (fun (a, _) (b, _) -> String.compare a b) !indexed_entries
