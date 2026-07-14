@@ -18,11 +18,14 @@
 
 (rule
  (target paths.ml)
- (deps %{exe:../bin/ithaca.exe} %{exe:../bin/optionals/pitch_shift.exe})
+ (deps
+  %{exe:../bin/ithaca.exe}
+  %{exe:../bin/ithaca_json_store.exe}
+  %{exe:../bin/optionals/pitch_shift.exe})
  (action
   (write-file
    %{target}
-   "let _build_default = Filename.dirname (Filename.dirname Sys.executable_name)\nlet ithaca = Filename.concat _build_default \"bin/ithaca.exe\"\nlet pitch_shift = Filename.concat _build_default \"bin/optionals/pitch_shift.exe\"\n")))
+   "let _build_default = Filename.dirname (Filename.dirname Sys.executable_name)\nlet ithaca = Filename.concat _build_default \"bin/ithaca.exe\"\nlet json_store = Filename.concat _build_default \"bin/ithaca_json_store.exe\"\nlet pitch_shift = Filename.concat _build_default \"bin/optionals/pitch_shift.exe\"\n")))
 
 (executable
  (name integration_test)

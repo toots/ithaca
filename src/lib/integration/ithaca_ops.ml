@@ -15,21 +15,32 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *)
 
-let index_file ~ithaca_bin ~b1_divisor ~reassign ~scheme ~quads_per_peak
-    ~max_hash_entries ~on_stage db_path file id =
+let opt_int name = function
+  | None -> ""
+  | Some n -> Printf.sprintf "%s %d " name n
+
+let opt_flag name = function false -> "" | true -> Printf.sprintf "%s " name
+
+let opt_string name = function
+  | None -> ""
+  | Some s -> Printf.sprintf "%s %s " name (Filename.quote s)
+
+(* Hashing flags passed to [hash_to_json]. The profile they produce is
+   serialized into the JSON output and reloaded by ithaca_json_store, so the
+   store side needs no flags of its own. *)
+let hash_flags ~b1_divisor ~reassign ~scheme ~quads_per_peak ~max_hash_entries =
+  Printf.sprintf "%s%s%s%s%s"
+    (opt_int "-b1-divisor" b1_divisor)
+    (opt_flag "-reassign" reassign)
+    (opt_string "-scheme" scheme)
+    (opt_int "-quads-per-peak" quads_per_peak)
+    (opt_int "-max-hash-entries" max_hash_entries)
+
+(* Hash [file] into [json_path] without touching any database: [-output json]
+   emits the hashes (with the embedded profile) to stdout. *)
+let hash_to_json ~ithaca_bin ~b1_divisor ~reassign ~scheme ~quads_per_peak
+    ~max_hash_entries ~on_stage ~json_path file id =
   let wav = Filename.temp_file "ithaca_idx" ".wav" in
-  let opt_int name = function
-    | None -> ""
-    | Some n -> Printf.sprintf "%s %d " name n
-  in
-  let opt_flag name = function
-    | false -> ""
-    | true -> Printf.sprintf "%s " name
-  in
-  let opt_string name = function
-    | None -> ""
-    | Some s -> Printf.sprintf "%s %s " name (Filename.quote s)
-  in
   Fun.protect
     ~finally:(fun () -> try Sys.remove wav with _ -> ())
     (fun () ->
@@ -38,14 +49,22 @@ let index_file ~ithaca_bin ~b1_divisor ~reassign ~scheme ~quads_per_peak
       &&
       (on_stage "hashing";
        Shell.run_cmd
-         "%s -mode store %s%s%s%s%s-lmdb-path %s -i %s -id %d 2>/dev/null"
+         "%s -mode store -output json %s-i %s -id %d > %s 2>/dev/null"
          (Filename.quote ithaca_bin)
-         (opt_int "-b1-divisor" b1_divisor)
-         (opt_flag "-reassign" reassign)
-         (opt_string "-scheme" scheme)
-         (opt_int "-quads-per-peak" quads_per_peak)
-         (opt_int "-max-hash-entries" max_hash_entries)
-         (Filename.quote db_path) (Filename.quote wav) id))
+         (hash_flags ~b1_divisor ~reassign ~scheme ~quads_per_peak
+            ~max_hash_entries)
+         (Filename.quote wav) id (Filename.quote json_path)))
+
+(* Load a batch of JSON hash files into the database serially. [ithaca_json_store]
+   writes a [.touch] sibling per stored file and a [.error] sibling on failure. *)
+let store_json ~json_store_bin ~db_path json_paths =
+  let inputs =
+    String.concat " "
+      (List.map (fun p -> Printf.sprintf "-i %s" (Filename.quote p)) json_paths)
+  in
+  Shell.run_cmd "%s -lmdb-path %s %s > /dev/null 2>&1"
+    (Filename.quote json_store_bin)
+    (Filename.quote db_path) inputs
 
 let search_wav ~ithaca_bin db_path wav =
   let raw =
