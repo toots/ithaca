@@ -69,6 +69,14 @@ let run ?(interrupted = fun () -> false) config =
     in
     let cursor = Atomic.make 0 in
 
+    let render_header ~done_ ~audio ~itime =
+      let db = Stats.disk_bytes config.db_path in
+      Printf.sprintf "[%d/%d] indexed · %s · db %s (%s)" done_ n_files
+        (Stats.realtime ~audio_s:audio ~wall_s:itime)
+        (Stats.human_bytes db)
+        (Stats.bytes_per_second db audio)
+    in
+
     let worker domain_idx () =
       let rec loop () =
         if interrupted () then ()
@@ -115,19 +123,15 @@ let run ?(interrupted = fun () -> false) config =
               Mutex.unlock indexed_mutex;
               (a, i)
             in
-            let db = Stats.disk_bytes config.db_path in
             Progress.update_header prog
-              (Printf.sprintf "[%d/%d] indexed · %s · db %s (%s)"
-                 (Atomic.get n_done) n_files
-                 (Stats.realtime ~audio_s:audio ~wall_s:itime)
-                 (Stats.human_bytes db)
-                 (Stats.bytes_per_second db audio));
+              (render_header ~done_:(Atomic.get n_done) ~audio ~itime);
             loop ()
           end
         end
       in
       loop ()
     in
+    Progress.update_header prog (render_header ~done_:0 ~audio:0. ~itime:0.);
     let workers =
       Array.init (jobs - 1) (fun i -> Domain.spawn (worker (i + 1)))
     in
