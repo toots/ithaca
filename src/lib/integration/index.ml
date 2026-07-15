@@ -32,13 +32,7 @@ type config = {
 (* A file hashed by a hashing worker, awaiting storage. Its hashes are spilled
    to [hashes_path] on disk rather than kept in memory, so a backlog does not
    grow the resident set (and swap). *)
-type queued = {
-  hashes_path : string;
-  file : string;
-  id : int;
-  dur : float;
-  hash_time : float;
-}
+type queued = { hashes_path : string; file : string; id : int; dur : float }
 
 let run ?(interrupted = fun () -> false) config =
   let files =
@@ -92,8 +86,8 @@ let run ?(interrupted = fun () -> false) config =
     let indexed_entries = ref [] in
     let total_audio = ref 0.0 in
     (* seconds of audio actually indexed *)
-    let total_index_time = ref 0.0 in
-    (* summed per-file hashing wall time *)
+    let t_start = Unix.gettimeofday () in
+    let elapsed () = Unix.gettimeofday () -. t_start in
     let prog = Progress.create jobs in
 
     let items =
@@ -149,7 +143,6 @@ let run ?(interrupted = fun () -> false) config =
                      stage)
               in
               let wav = Filename.temp_file "ithaca_idx" ".wav" in
-              let t0 = Unix.gettimeofday () in
               let hashes_path =
                 Fun.protect
                   ~finally:(fun () -> try Sys.remove wav with _ -> ())
@@ -167,7 +160,6 @@ let run ?(interrupted = fun () -> false) config =
                       Some path
                     end)
               in
-              let hash_time = Unix.gettimeofday () -. t0 in
               match hashes_path with
               | Some hashes_path ->
                   Mutex.lock q_mutex;
@@ -177,7 +169,7 @@ let run ?(interrupted = fun () -> false) config =
                   while Queue.length queue >= max_pending do
                     Condition.wait q_space q_mutex
                   done;
-                  Queue.add { hashes_path; file; id; dur; hash_time } queue;
+                  Queue.add { hashes_path; file; id; dur } queue;
                   Condition.signal q_cond;
                   Mutex.unlock q_mutex
               | None -> Atomic.incr n_done
@@ -231,17 +223,17 @@ let run ?(interrupted = fun () -> false) config =
                 Mutex.lock stats_mutex;
                 indexed_entries := (r.file, r.id) :: !indexed_entries;
                 total_audio := !total_audio +. r.dur;
-                total_index_time := !total_index_time +. r.hash_time;
                 Mutex.unlock stats_mutex)
               batch;
-            let audio, itime =
+            let audio =
               Mutex.lock stats_mutex;
-              let a = !total_audio and i = !total_index_time in
+              let a = !total_audio in
               Mutex.unlock stats_mutex;
-              (a, i)
+              a
             in
             Progress.update_header prog
-              (render_header ~done_:(Atomic.get n_done) ~audio ~itime);
+              (render_header ~done_:(Atomic.get n_done) ~audio
+                 ~itime:(elapsed ()));
             loop ()
       in
       loop ()
@@ -256,7 +248,7 @@ let run ?(interrupted = fun () -> false) config =
     if !total_audio > 0.0 then begin
       let db = Stats.disk_bytes config.db_path in
       Printf.printf "Indexing speed: %s\n"
-        (Stats.realtime ~audio_s:!total_audio ~wall_s:!total_index_time);
+        (Stats.realtime ~audio_s:!total_audio ~wall_s:(elapsed ()));
       Printf.printf "Database size:  %s (%s)\n" (Stats.human_bytes db)
         (Stats.bytes_per_second db !total_audio)
     end;
