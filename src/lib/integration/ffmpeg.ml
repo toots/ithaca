@@ -26,16 +26,17 @@ let get_duration file =
   try float_of_string (String.trim s) with _ -> 0.0
 
 let to_wav input output =
-  Shell.run_cmd "ffmpeg -y -i %s -ar 44100 -ac 2 -f wav %s 2>/dev/null"
+  Shell.run_cmd "ffmpeg -nostdin -y -i %s -ar 44100 -ac 2 -f wav %s 2>/dev/null"
     (Filename.quote input) (Filename.quote output)
 
 let extract_clip input output start dur =
-  Shell.run_cmd "ffmpeg -y -i %s -ss %g -t %g -f wav %s 2>/dev/null"
+  Shell.run_cmd "ffmpeg -nostdin -y -i %s -ss %g -t %g -f wav %s 2>/dev/null"
     (Filename.quote input) start dur (Filename.quote output)
 
 let pitch_shift input output semitones =
   let ratio = 2.0 ** (semitones /. 12.0) in
-  Shell.run_cmd "ffmpeg -y -i %s -af rubberband=pitch=%g -f wav %s 2>/dev/null"
+  Shell.run_cmd
+    "ffmpeg -nostdin -y -i %s -af rubberband=pitch=%g -f wav %s 2>/dev/null"
     (Filename.quote input) ratio (Filename.quote output)
 
 let mix_sfx ?(offset = 0.0) ?(mono = false) ?(source_lufs = -14.0)
@@ -46,7 +47,7 @@ let mix_sfx ?(offset = 0.0) ?(mono = false) ?(source_lufs = -14.0)
     else Printf.sprintf "loudnorm=I=%g" sfx_lufs
   in
   Shell.run_cmd
-    "ffmpeg -y -i %s -ss %g -stream_loop -1 -i %s -filter_complex \
+    "ffmpeg -nostdin -y -i %s -ss %g -stream_loop -1 -i %s -filter_complex \
      '[0:a]loudnorm=I=%g[a];[1:a]%s[s];[a][s]amix=inputs=2:duration=first' -ar \
      44100 -acodec pcm_s16le -f wav %s 2>/dev/null"
     (Filename.quote input) offset (Filename.quote sfx) source_lufs sfx_chain
