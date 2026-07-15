@@ -17,6 +17,35 @@
 
 let make_processor = Audio.make_fcqt
 
+(* Spill a hash stream to a JSON file and read it back, so a producer that
+   outruns the consumer can hold its backlog on disk instead of in memory.
+   Reuses the raw-hash codec ([Distributed_j], also used by ithaca_distributed).
+   [write_hashes] consumes (pulls) the stream. *)
+let write_hashes path hashes =
+  let entries =
+    List.map
+      (fun { Hashes.pos; hash; bin } -> { Distributed_t.pos; hash; bin })
+      (IStream.pull hashes)
+  in
+  let buf = Buffer.create 4096 in
+  Distributed_j.write_hashes buf entries;
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> Buffer.output_buffer oc buf)
+
+let read_hashes path =
+  let ic = open_in path in
+  let data =
+    Fun.protect
+      ~finally:(fun () -> close_in ic)
+      (fun () -> really_input_string ic (in_channel_length ic))
+  in
+  IStream.make
+    (List.map
+       (fun { Distributed_t.pos; hash; bin } -> { Hashes.pos; hash; bin })
+       (Distributed_j.hashes_of_string data))
+
 let hash_file ?(probes = false) ?fcqt ~merger ~params filename =
   let open_wav ?fcqt merger =
     let wav = Wav.fopen filename in

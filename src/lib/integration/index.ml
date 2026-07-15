@@ -29,9 +29,11 @@ type config = {
   jobs : int; (* 0 = auto *)
 }
 
-(* A file hashed by a hashing worker, awaiting storage. *)
+(* A file hashed by a hashing worker, awaiting storage. Its hashes are spilled
+   to [hashes_path] on disk rather than kept in memory, so a backlog does not
+   grow the resident set (and swap). *)
 type queued = {
-  hashes : Hashes.t;
+  hashes_path : string;
   file : string;
   id : int;
   dur : float;
@@ -148,7 +150,7 @@ let run ?(interrupted = fun () -> false) config =
               in
               let wav = Filename.temp_file "ithaca_idx" ".wav" in
               let t0 = Unix.gettimeofday () in
-              let hashes =
+              let hashes_path =
                 Fun.protect
                   ~finally:(fun () -> try Sys.remove wav with _ -> ())
                   (fun () ->
@@ -156,23 +158,26 @@ let run ?(interrupted = fun () -> false) config =
                     if not (Ffmpeg.to_wav file wav) then None
                     else begin
                       on_stage "hashing";
-                      (* Pull the stream here so all hashing (and the WAV read)
-                         happens before the temp file is removed. *)
-                      Some
-                        (IStream.make
-                           (IStream.pull
-                              (Store.hash_file ~fcqt ~merger ~params wav)))
+                      (* Hash and spill to disk here (this pulls the stream, so
+                         all hashing and the WAV read happen now), keeping only
+                         the path — not the hashes — in the queue. *)
+                      let path = Filename.temp_file "ithaca_hashes" ".json" in
+                      Store.write_hashes path
+                        (Store.hash_file ~fcqt ~merger ~params wav);
+                      Some path
                     end)
               in
               let hash_time = Unix.gettimeofday () -. t0 in
-              match hashes with
-              | Some hashes ->
+              match hashes_path with
+              | Some hashes_path ->
                   Mutex.lock q_mutex;
-                  (* Back-pressure: wait for the store worker to make room. *)
+                  (* Back-pressure: wait for the store worker to make room (this
+                     also bounds how many spilled files sit on disk). Memory is
+                     already released — the hashes are on disk by now. *)
                   while Queue.length queue >= max_pending do
                     Condition.wait q_space q_mutex
                   done;
-                  Queue.add { hashes; file; id; dur; hash_time } queue;
+                  Queue.add { hashes_path; file; id; dur; hash_time } queue;
                   Condition.signal q_cond;
                   Mutex.unlock q_mutex
               | None -> Atomic.incr n_done
@@ -215,9 +220,12 @@ let run ?(interrupted = fun () -> false) config =
         | batch ->
             Progress.update_job prog store_idx
               (Printf.sprintf "storing %d file(s)" (List.length batch));
-            Store.store db (List.map (fun r -> (r.id, r.hashes)) batch);
+            (* Read and store one spilled file at a time so the store side never
+               holds the whole backlog in memory. *)
             List.iter
               (fun r ->
+                Store.store db [ (r.id, Store.read_hashes r.hashes_path) ];
+                (try Sys.remove r.hashes_path with _ -> ());
                 Atomic.incr n_indexed;
                 Atomic.incr n_done;
                 Mutex.lock stats_mutex;

@@ -36,6 +36,14 @@ val hash_file :
     so the shared processor is never used concurrently). Without [~fcqt], [Both]
     falls back to [Hashes.merge_parallel] as before. *)
 
+val write_hashes : string -> Hashes.t -> unit
+(** Spill a hash stream to a JSON file (consuming the stream), so a producer
+    that outruns the consumer can hold its backlog on disk rather than memory.
+*)
+
+val read_hashes : string -> Hashes.t
+(** Read back a file written by [write_hashes]. *)
+
 type t
 (** A database open for the lifetime of the value: the underlying LMDB
     environment stays open across every [store]/[put_stored] call. *)
