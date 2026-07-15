@@ -12,4 +12,5 @@ let () =
              Quads_tests.suite;
              Db_tests.suite;
              Search_tests.suite;
+             Store_tests.suite;
            ])

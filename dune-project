@@ -18,6 +18,8 @@
   cryptokit
   fftw3
   samplerate
+  jsont
+  bytesrw
   (ounit2 :with-test)
   (soundtouch :with-test)
   (imagelib :with-doc))

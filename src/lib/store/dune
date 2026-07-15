@@ -7,4 +7,5 @@
   ithaca_db
   ithaca_lmdb
   ithaca_json
-  ithaca_atd))
+  ithaca_atd
+  jsont.bytesrw))

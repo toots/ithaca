@@ -18,4 +18,9 @@
 type 'a t = unit -> 'a option
 
 val make : 'a list -> 'a t
+
+(* [of_iter iter] turns a push-based producer into a pull stream, suspending
+   the producer at each yielded element. The producer's resources are only
+   released once the stream has been pulled to exhaustion. *)
+val of_iter : (('a -> unit) -> unit) -> 'a t
 val pull : 'a t -> 'a list

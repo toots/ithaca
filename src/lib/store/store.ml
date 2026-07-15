@@ -19,32 +19,61 @@ let make_processor = Audio.make_fcqt
 
 (* Spill a hash stream to a JSON file and read it back, so a producer that
    outruns the consumer can hold its backlog on disk instead of in memory.
-   Reuses the raw-hash codec ([Distributed_j], also used by ithaca_distributed).
+   Both directions stream one hash entry at a time through jsont/bytesrw:
+   neither the hash list nor the JSON text is ever whole in memory.
    [write_hashes] consumes (pulls) the stream. *)
-let write_hashes path hashes =
-  let entries =
-    List.map
-      (fun { Hashes.pos; hash; bin } -> { Distributed_t.pos; hash; bin })
-      (IStream.pull hashes)
+let hash_entry_jsont =
+  Jsont.Object.map
+    (fun pos hash bin -> { Hashes.pos; hash; bin })
+    ~kind:"hash_entry"
+  |> Jsont.Object.mem "pos" Jsont.int ~enc:(fun entry -> entry.Hashes.pos)
+  |> Jsont.Object.mem "hash" Jsont.int ~enc:(fun entry -> entry.Hashes.hash)
+  |> Jsont.Object.mem "bin" Jsont.int ~enc:(fun entry -> entry.Hashes.bin)
+  |> Jsont.Object.finish
+
+(* Encodes a [Hashes.t] by folding over the stream, pulling one entry at a
+   time. *)
+let hashes_enc_jsont =
+  let enc fold acc hashes =
+    let rec pull index acc =
+      match hashes () with
+      | None -> acc
+      | Some entry -> pull (index + 1) (fold acc index entry)
+    in
+    pull 0 acc
   in
-  let buf = Buffer.create 4096 in
-  Distributed_j.write_hashes buf entries;
-  let oc = open_out path in
+  Jsont.Array.array (Jsont.Array.map ~enc:{ Jsont.Array.enc } hash_entry_jsont)
+
+(* Decodes by pushing each entry to [yield] as it is parsed, building
+   nothing. *)
+let hashes_dec_jsont yield =
+  Jsont.Array.array
+    (Jsont.Array.map
+       ~dec_empty:(fun () -> ())
+       ~dec_add:(fun _ entry () -> yield entry)
+       ~dec_finish:(fun _ _ () -> ())
+       hash_entry_jsont)
+
+let write_hashes path hashes =
+  let oc = open_out_bin path in
   Fun.protect
     ~finally:(fun () -> close_out oc)
-    (fun () -> Buffer.output_buffer oc buf)
+    (fun () ->
+      let writer = Bytesrw.Bytes.Writer.of_out_channel oc in
+      match Jsont_bytesrw.encode hashes_enc_jsont hashes ~eod:true writer with
+      | Ok () -> ()
+      | Error msg -> failwith msg)
 
 let read_hashes path =
-  let ic = open_in path in
-  let data =
-    Fun.protect
-      ~finally:(fun () -> close_in ic)
-      (fun () -> really_input_string ic (in_channel_length ic))
-  in
-  IStream.make
-    (List.map
-       (fun { Distributed_t.pos; hash; bin } -> { Hashes.pos; hash; bin })
-       (Distributed_j.hashes_of_string data))
+  IStream.of_iter (fun yield ->
+      let ic = open_in_bin path in
+      Fun.protect
+        ~finally:(fun () -> close_in ic)
+        (fun () ->
+          let reader = Bytesrw.Bytes.Reader.of_in_channel ic in
+          match Jsont_bytesrw.decode (hashes_dec_jsont yield) reader with
+          | Ok () -> ()
+          | Error msg -> failwith msg))
 
 let hash_file ?(probes = false) ?fcqt ~merger ~params filename =
   let open_wav ?fcqt merger =

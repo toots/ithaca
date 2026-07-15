@@ -9,6 +9,7 @@
   ithaca_search
   ithaca_lmdb
   ithaca_args
+  ithaca_store
   ounit2
   unix))
 
