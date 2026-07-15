@@ -182,7 +182,7 @@ let run ?(interrupted = fun () -> false) config entries =
                 let results = search clip in
                 Atomic.incr basic_tested;
                 (match results with
-                | { Search_t.id = s; _ } :: _ when int_of_string_opt s = Some id
+                | { Search.id = s; _ } :: _ when int_of_string_opt s = Some id
                   ->
                     Atomic.incr basic_identified
                 | _ -> ());
@@ -212,7 +212,7 @@ let run ?(interrupted = fun () -> false) config entries =
                     let results = search mixed in
                     Atomic.incr sfx_tested;
                     (match results with
-                    | { Search_t.id = s; _ } :: _
+                    | { Search.id = s; _ } :: _
                       when int_of_string_opt s = Some id ->
                         Atomic.incr sfx_identified
                     | _ -> ());
@@ -237,7 +237,7 @@ let run ?(interrupted = fun () -> false) config entries =
                       let results = search shifted in
                       Atomic.incr pr.tested;
                       (match results with
-                      | { Search_t.id = s; _ } :: _
+                      | { Search.id = s; _ } :: _
                         when int_of_string_opt s = Some id ->
                           Atomic.incr pr.identified
                       | _ -> ());

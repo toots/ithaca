@@ -1,4 +1,4 @@
 (library
  (name ithaca_audio)
  (wrapped false)
- (libraries ithaca_atd ithaca_utils ithaca_fcqt samplerate))
+ (libraries ithaca_utils ithaca_fcqt samplerate jsont jsont.bytesrw))

@@ -46,7 +46,7 @@ val set_max_hash_entries : int -> unit
 val base64_profile : unit -> string
 val set_base64_profile : string -> unit
 val json_profile : unit -> string
-val get_profile : unit -> Profile_t.profile
+val get_profile : unit -> Profile.t
 val audio_params : unit -> Audio.audio_params
 val merger : unit -> Audio.merger_mode
 val store_arg : arg

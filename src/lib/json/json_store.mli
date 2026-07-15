@@ -15,5 +15,8 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *)
 
-val unpack : Stored_hashes_t.hashes -> Db.stored_hashes
+type stored_hashes_file = { profile : string; hashes : Db.stored_hashes }
+
+val of_string : string -> stored_hashes_file
+val to_string : stored_hashes_file -> string
 val operations : Db.operations

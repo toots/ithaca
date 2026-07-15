@@ -16,7 +16,7 @@
  *)
 
 val load :
-  profile_of_string:(string -> Profile_t.profile) ->
+  profile_of_string:(string -> Profile.t) ->
   batch_size:int ->
   string ->
   string list ->

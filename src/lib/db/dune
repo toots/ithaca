@@ -1,4 +1,4 @@
 (library
  (name ithaca_db)
  (wrapped false)
- (libraries ithaca_audio))
+ (libraries ithaca_audio jsont jsont.bytesrw))

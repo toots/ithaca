@@ -72,12 +72,10 @@ let load ~profile_of_string ~batch_size db_path filenames =
             else begin
               Printf.printf "Storing JSON data from file %s..\n%!" filename;
               try
-                let data =
-                  Stored_hashes_j.stored_hashes_of_string (read_file filename)
-                in
-                let profile = profile_of_string data.Stored_hashes_j.profile in
+                let data = Json_store.of_string (read_file filename) in
+                let profile = profile_of_string data.Json_store.profile in
                 ( (fun () -> touch tname) :: marks,
-                  hashes @ Json_store.unpack data.Stored_hashes_j.hashes,
+                  hashes @ data.Json_store.hashes,
                   Some profile )
               with e ->
                 Printf.eprintf "Error while parsing %s: %s\n" filename

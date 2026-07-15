@@ -2,7 +2,6 @@
  (names ithaca ithaca_json_store ithaca_distributed)
  (public_names ithaca ithaca_json_store ithaca_distributed)
  (libraries
-  ithaca_atd
   ithaca_utils
   ithaca_audio
   ithaca_db
@@ -11,4 +10,6 @@
   ithaca_json
   ithaca_store
   ithaca_args
-  unix))
+  unix
+  jsont
+  jsont.bytesrw))

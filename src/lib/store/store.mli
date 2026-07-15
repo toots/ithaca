@@ -48,8 +48,8 @@ type t
 (** A database open for the lifetime of the value: the underlying LMDB
     environment stays open across every [store]/[put_stored] call. *)
 
-val db_params_of_profile : Profile_t.profile -> Db.params
-val open_db : profile:Profile_t.profile -> db_params:Db.params -> string -> t
+val db_params_of_profile : Profile.t -> Db.params
+val open_db : profile:Profile.t -> db_params:Db.params -> string -> t
 
 val store : t -> (int * Hashes.t) list -> unit
 (** Store raw hash streams (a list is one write transaction). *)

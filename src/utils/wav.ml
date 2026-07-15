@@ -17,7 +17,7 @@
 
 type wav_channel = { input : in_channel; mutable position : int }
 
-type header = Wav_t.header = {
+type header = {
   channels : int; (* 1 = mono ; 2 = stereo *)
   sample_rate : int; (* in Hz *)
   bytes_per_second : int;
@@ -26,6 +26,30 @@ type header = Wav_t.header = {
   bits_per_sample : int;
   format_code : int;
 }
+
+let header_jsont =
+  Jsont.Object.map
+    (fun channels sample_rate bytes_per_second bytes_per_sample bits_per_sample
+         format_code ->
+      {
+        channels;
+        sample_rate;
+        bytes_per_second;
+        bytes_per_sample;
+        bits_per_sample;
+        format_code;
+      })
+    ~kind:"header"
+  |> Jsont.Object.mem "channels" Jsont.int ~enc:(fun h -> h.channels)
+  |> Jsont.Object.mem "sample_rate" Jsont.int ~enc:(fun h -> h.sample_rate)
+  |> Jsont.Object.mem "bytes_per_second" Jsont.int ~enc:(fun h ->
+      h.bytes_per_second)
+  |> Jsont.Object.mem "bytes_per_sample" Jsont.int ~enc:(fun h ->
+      h.bytes_per_sample)
+  |> Jsont.Object.mem "bits_per_sample" Jsont.int ~enc:(fun h ->
+      h.bits_per_sample)
+  |> Jsont.Object.mem "format_code" Jsont.int ~enc:(fun h -> h.format_code)
+  |> Jsont.Object.finish
 
 type t = { ic : wav_channel; header : header; data_offset : int; length : int }
 

@@ -23,12 +23,35 @@ type search_params = {
   debug : bool;
 }
 
-type result = Search_t.result = {
+type result = {
   start : float;
   stop : float;
   id : string;
   pitch_semitones : float;
 }
+
+let result_jsont =
+  Jsont.Object.map
+    (fun start stop id pitch_semitones -> { start; stop; id; pitch_semitones })
+    ~kind:"result"
+  |> Jsont.Object.mem "start" Jsont.number ~enc:(fun r -> r.start)
+  |> Jsont.Object.mem "stop" Jsont.number ~enc:(fun r -> r.stop)
+  |> Jsont.Object.mem "id" Jsont.string ~enc:(fun r -> r.id)
+  |> Jsont.Object.mem "pitch_semitones" Jsont.number ~dec_absent:0.
+       ~enc:(fun r -> r.pitch_semitones)
+  |> Jsont.Object.finish
+
+let results_jsont = Jsont.list result_jsont
+
+let of_string s =
+  match Jsont_bytesrw.decode_string results_jsont s with
+  | Ok v -> v
+  | Error msg -> failwith msg
+
+let to_string results =
+  match Jsont_bytesrw.encode_string results_jsont results with
+  | Ok s -> s
+  | Error msg -> failwith msg
 
 type search_match = {
   match_start : int;

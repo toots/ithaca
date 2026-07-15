@@ -15,12 +15,24 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *)
 
-type slice = Distributed_t.slice = { offset : float; start : int; length : int }
+type slice = { offset : float; start : int; length : int }
+type slices = { header : Wav.header; slices : slice list }
 
-type slices = Distributed_t.slices = {
-  header : Wav.header;
-  slices : slice list;
-}
+let slice_jsont =
+  Jsont.Object.map
+    (fun offset start length -> { offset; start; length })
+    ~kind:"slice"
+  |> Jsont.Object.mem "offset" Jsont.number ~enc:(fun s ->
+      float_of_string (Printf.sprintf "%.02f" s.offset))
+  |> Jsont.Object.mem "start" Jsont.int ~enc:(fun s -> s.start)
+  |> Jsont.Object.mem "length" Jsont.int ~enc:(fun s -> s.length)
+  |> Jsont.Object.finish
+
+let slices_jsont =
+  Jsont.Object.map (fun header slices -> { header; slices }) ~kind:"slices"
+  |> Jsont.Object.mem "header" Wav.header_jsont ~enc:(fun s -> s.header)
+  |> Jsont.Object.mem "slices" (Jsont.list slice_jsont) ~enc:(fun s -> s.slices)
+  |> Jsont.Object.finish
 
 let usage = "ithaca_distributed <args>"
 
@@ -110,17 +122,23 @@ let enqueue () =
   let slices =
     List.sort (fun s s' -> compare s.start s'.start) (f [] data_offset)
   in
-  let buf = Buffer.create 4096 in
-  Distributed_j.write_slices buf { header; slices };
-  print_string (Buffer.contents buf)
+  match Jsont_bytesrw.encode_string slices_jsont { header; slices } with
+  | Ok s -> print_string s
+  | Error msg -> failwith msg
 
 let make_storage fn =
   let operations = Args.lmdb_operations () in
   let db = Db.make (Args.db_params ()) operations in
   fn db
 
+let hashes_list_jsont = Jsont.list Hashes.entry_jsont
+
 let hashes_of_wav ?(probes = false) ~audio_params filename header =
-  let header = Wav_j.header_of_string header in
+  let header =
+    match Jsont_bytesrw.decode_string Wav.header_jsont header with
+    | Ok h -> h
+    | Error msg -> failwith msg
+  in
   let length = (Unix.stat filename).Unix.st_size in
   let open_wav merger =
     let ic = open_in_bin filename in
@@ -130,7 +148,7 @@ let hashes_of_wav ?(probes = false) ~audio_params filename header =
   match Args.merger () with
   | Audio.Single merger -> open_wav merger
   | Audio.Both ->
-      if header.Wav_t.channels = 1 then open_wav Audio.mono_merger
+      if header.Wav.channels = 1 then open_wav Audio.mono_merger
       else
         Hashes.merge_parallel
           (open_wav Audio.mono_merger)
@@ -144,14 +162,9 @@ let hash () =
   end;
   let audio_params = Args.audio_params () in
   let hashes = hashes_of_wav ~audio_params !filename !header in
-  let buf = Buffer.create 4096 in
-  let entries =
-    List.map
-      (fun { Hashes.pos; hash; bin } -> { Distributed_t.pos; hash; bin })
-      (IStream.pull hashes)
-  in
-  Distributed_j.write_hashes buf entries;
-  print_string (Buffer.contents buf)
+  match Jsont_bytesrw.encode_string hashes_list_jsont (IStream.pull hashes) with
+  | Ok s -> print_string s
+  | Error msg -> failwith msg
 
 let hashes_of_hashes filename =
   let ch = open_in filename in
@@ -164,11 +177,9 @@ let hashes_of_hashes filename =
   in
   f ();
   close_in ch;
-  let hashes = Buffer.contents buf in
-  IStream.make
-    (List.map
-       (fun { Distributed_t.pos; hash; bin } -> { Hashes.pos; hash; bin })
-       (Distributed_j.hashes_of_string hashes))
+  match Jsont_bytesrw.decode_string hashes_list_jsont (Buffer.contents buf) with
+  | Ok entries -> IStream.make entries
+  | Error msg -> failwith msg
 
 let search () =
   let audio_params = Args.audio_params () in
@@ -194,9 +205,7 @@ let search () =
         { m with Search.start = start +. !offset; stop = stop +. !offset })
       matches
   in
-  let buf = Buffer.create 4096 in
-  Search_j.write_results buf matches;
-  print_string (Buffer.contents buf)
+  print_string (Search.to_string matches)
 
 let finalize () =
   if !matches = "" then begin
@@ -204,11 +213,9 @@ let finalize () =
     Arg.usage args usage;
     exit 1
   end;
-  let matches = Search_j.results_of_string !matches in
+  let matches = Search.of_string !matches in
   let results = Search.consolidate matches in
-  let buf = Buffer.create 4096 in
-  Distributed_j.write_results buf results;
-  print_string (Buffer.contents buf)
+  print_string (Search.to_string results)
 
 let () =
   Printf.eprintf "ithaca_distributed -- Audio Fingerprinting in exile\n%!";

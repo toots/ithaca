@@ -13,8 +13,6 @@
  (depends
   (ocaml (>= "5.1"))
   (dune (>= "3.22"))
-  (atdgen :build)
-  atdgen-runtime
   cryptokit
   fftw3
   samplerate

@@ -23,7 +23,7 @@ let search_wav ~ithaca_bin db_path wav =
          (Filename.quote ithaca_bin)
          (Filename.quote db_path) (Filename.quote wav))
   in
-  try Search_j.results_of_string (String.trim raw) with _ -> []
+  try Search.of_string (String.trim raw) with _ -> []
 
 let random_bits rng =
   let a = Random.State.bits rng land 0xFFFF in

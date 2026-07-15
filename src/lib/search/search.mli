@@ -23,12 +23,17 @@ type search_params = {
   debug : bool;
 }
 
-type result = Search_t.result = {
+type result = {
   start : float;
   stop : float;
   id : string;
   pitch_semitones : float;
 }
+
+val result_jsont : result Jsont.t
+val results_jsont : result list Jsont.t
+val of_string : string -> result list
+val to_string : result list -> string
 
 type search_entry = Db.match_entry list
 type search = Hashes.hash list -> search_entry list

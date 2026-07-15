@@ -1,7 +1,6 @@
 (test
  (name runner)
  (libraries
-  ithaca_atd
   ithaca_utils
   ithaca_fcqt
   ithaca_audio
@@ -28,7 +27,7 @@
 (executable
  (name integration_test)
  (libraries
-  ithaca_atd
+  ithaca_db
   ithaca_audio
   ithaca_args
   ithaca_integration

@@ -53,3 +53,17 @@ val merge : t -> t -> t
    domain first. Both streams must already be fully constructed: FFTW plan
    creation is not thread-safe, only stream consumption is. *)
 val merge_parallel : t -> t -> t
+
+val entry_jsont : hashes Jsont.t
+(** JSON object codec for a single [hashes] entry:
+    [{"pos": ..., "hash": ..., "bin": ...}]. *)
+
+val write_stream : string -> t -> unit
+(** [write_stream path hashes] streams [hashes] to [path] as a JSON array, one
+    entry at a time (pulling the stream), so the whole stream is never held in
+    memory at once. *)
+
+val read_stream : string -> t
+(** [read_stream path] streams back a file written by [write_stream]. The file
+    is only read (and its handle held open) while the returned stream is pulled;
+    it is closed once exhausted. *)

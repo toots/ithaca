@@ -18,31 +18,7 @@
 let () = Printexc.record_backtrace true
 
 type arg = Arg.key * Arg.spec * Arg.doc
-
-type profile = Profile_t.profile = {
-  samplerate : int;
-  frame_step : float;
-  min_freq : float;
-  max_freq : float;
-  bins_per_octave : float;
-  reassign : bool;
-  scheme : string;
-  quads_per_peak : int;
-  max_hash_entries : int;
-  delta_x : float;
-  delta_y : int;
-  max_x : float;
-  max_y : int;
-  merger : string;
-  max_hash_id : int;
-  max_hash_pos : int;
-  saturate : bool;
-  search_frame_length : float;
-  search_frame_step : float;
-  search_buffer_size : int;
-  search_threshold : int;
-  whitening_time : float;
-}
+type profile = Profile.t
 
 let merger_of_string = function
   | "mono" -> Audio.Single Audio.mono_merger
@@ -53,7 +29,7 @@ let merger_of_string = function
 let profile =
   ref
     {
-      Profile_t.samplerate = Audio.default_params.Audio.samplerate;
+      Profile.samplerate = Audio.default_params.Audio.samplerate;
       frame_step = Audio.default_params.Audio.frame_step;
       min_freq = Audio.default_params.Audio.hashes_min_freq;
       max_freq = Audio.default_params.Audio.hashes_max_freq;
@@ -84,18 +60,18 @@ let set_profile p =
   profile :=
     {
       p with
-      Profile_t.search_frame_length =
+      Profile.search_frame_length =
         f ~d:Search.default_params.Search.frame_length ~z:0.
-          p.Profile_t.search_frame_length;
+          p.Profile.search_frame_length;
       search_frame_step =
         f ~d:Search.default_params.Search.frame_step ~z:0.
-          p.Profile_t.search_frame_step;
+          p.Profile.search_frame_step;
       search_buffer_size =
         f ~d:Search.default_params.Search.buffer_size ~z:0
-          p.Profile_t.search_buffer_size;
+          p.Profile.search_buffer_size;
       search_threshold =
         f ~d:Search.default_params.Search.threshold ~z:0
-          p.Profile_t.search_threshold;
+          p.Profile.search_threshold;
     }
 
 let default_profile = ref true
@@ -112,17 +88,17 @@ let set_json_profile arg =
     end
     else arg
   in
-  set_profile (Profile_j.profile_of_string json)
+  set_profile (Profile.of_string json)
 
 let base64_profile () =
   Cryptokit.transform_string
     (Cryptokit.Base64.encode_compact ())
-    (Profile_b.string_of_profile !profile)
+    (Profile.to_string !profile)
 
 let set_base64_profile data =
   default_profile := false;
   set_profile
-    (Profile_b.profile_of_string
+    (Profile.of_string
        (Cryptokit.transform_string (Cryptokit.Base64.decode ()) data))
 
 let b1_divisor = ref Audio.default_params.Audio.hashes_b1_divisor
@@ -137,7 +113,7 @@ let b1_divisor_arg =
        also more hash collisions across songs."
       !b1_divisor )
 
-let set_reassign () = profile := { !profile with Profile_t.reassign = true }
+let set_reassign () = profile := { !profile with Profile.reassign = true }
 
 let reassign_arg =
   ( "-reassign",
@@ -165,10 +141,10 @@ let set_scheme s =
   let search_threshold, max_hash_entries =
     match scheme_of_string s with
     | Audio.Quads -> (quads_search_threshold, quads_max_hash_entries)
-    | Audio.Pairs -> (!profile.Profile_t.search_threshold, 0)
+    | Audio.Pairs -> (!profile.Profile.search_threshold, 0)
   in
   profile :=
-    { !profile with Profile_t.scheme = s; search_threshold; max_hash_entries }
+    { !profile with Profile.scheme = s; search_threshold; max_hash_entries }
 
 let scheme_arg =
   ( "-scheme",
@@ -183,7 +159,7 @@ let scheme_arg =
    [-max-hash-entries] caps entries per hash, dropping over-common
    geometries; it mainly bites at large corpora. *)
 let set_quads_per_peak n =
-  profile := { !profile with Profile_t.quads_per_peak = n }
+  profile := { !profile with Profile.quads_per_peak = n }
 
 let quads_per_peak_arg =
   ( "-quads-per-peak",
@@ -195,7 +171,7 @@ let quads_per_peak_arg =
       Quads.default_quads_per_peak )
 
 let set_max_hash_entries n =
-  profile := { !profile with Profile_t.max_hash_entries = n }
+  profile := { !profile with Profile.max_hash_entries = n }
 
 let max_hash_entries_arg =
   ( "-max-hash-entries",
@@ -208,8 +184,7 @@ let max_hash_entries_arg =
 
 let whitening_time_arg =
   ( "-whitening-time",
-    Arg.Float
-      (fun t -> profile := { !profile with Profile_t.whitening_time = t }),
+    Arg.Float (fun t -> profile := { !profile with Profile.whitening_time = t }),
     Printf.sprintf
       "Spectral whitening EMA time constant in seconds (default: %.1f, 0 to \
        disable)."
@@ -249,7 +224,7 @@ let parse ?(allow_anon = false) ~args usage =
   fetch_lmdb_profile ()
 
 let anonymous_args () = List.rev !anonymous_args
-let json_profile () = Profile_j.string_of_profile !profile
+let json_profile () = Profile.to_string !profile
 
 let profile_arg =
   ( "-profile",

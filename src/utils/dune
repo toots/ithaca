@@ -1,7 +1,7 @@
 (library
  (name ithaca_utils)
  (wrapped false)
- (libraries ithaca_atd unix)
+ (libraries unix jsont)
  (foreign_stubs
   (language c)
   (names wav_c)

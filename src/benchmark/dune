@@ -1,7 +1,6 @@
 (executable
  (name benchmarks)
  (libraries
-  ithaca_atd
   ithaca_utils
   ithaca_fcqt
   ithaca_audio

@@ -58,14 +58,13 @@ let env_for ?(must_exist = true) path =
 
 let put_profile path profile =
   let env = env_for ~must_exist:false path in
-  let profile = Profile_b.string_of_profile profile in
+  let profile = Profile.to_string profile in
   begin try if profile <> lmdb_get_profile env then raise Inconsistent_profile
   with Not_found -> ()
   end;
   lmdb_put_profile env profile
 
-let get_profile path =
-  Profile_b.profile_of_string (lmdb_get_profile (env_for path))
+let get_profile path = Profile.of_string (lmdb_get_profile (env_for path))
 
 let put ~max_entries path max hashes =
   let hashes =

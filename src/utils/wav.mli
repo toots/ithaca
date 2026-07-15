@@ -15,7 +15,7 @@
  * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  *)
 
-type header = Wav_t.header = {
+type header = {
   channels : int; (* 1 = mono ; 2 = stereo *)
   sample_rate : int; (* in Hz *)
   bytes_per_second : int;
@@ -24,6 +24,8 @@ type header = Wav_t.header = {
   bits_per_sample : int;
   format_code : int;
 }
+
+val header_jsont : header Jsont.t
 
 type t
 

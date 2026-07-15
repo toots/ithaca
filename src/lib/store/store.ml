@@ -19,61 +19,9 @@ let make_processor = Audio.make_fcqt
 
 (* Spill a hash stream to a JSON file and read it back, so a producer that
    outruns the consumer can hold its backlog on disk instead of in memory.
-   Both directions stream one hash entry at a time through jsont/bytesrw:
-   neither the hash list nor the JSON text is ever whole in memory.
    [write_hashes] consumes (pulls) the stream. *)
-let hash_entry_jsont =
-  Jsont.Object.map
-    (fun pos hash bin -> { Hashes.pos; hash; bin })
-    ~kind:"hash_entry"
-  |> Jsont.Object.mem "pos" Jsont.int ~enc:(fun entry -> entry.Hashes.pos)
-  |> Jsont.Object.mem "hash" Jsont.int ~enc:(fun entry -> entry.Hashes.hash)
-  |> Jsont.Object.mem "bin" Jsont.int ~enc:(fun entry -> entry.Hashes.bin)
-  |> Jsont.Object.finish
-
-(* Encodes a [Hashes.t] by folding over the stream, pulling one entry at a
-   time. *)
-let hashes_enc_jsont =
-  let enc fold acc hashes =
-    let rec pull index acc =
-      match hashes () with
-      | None -> acc
-      | Some entry -> pull (index + 1) (fold acc index entry)
-    in
-    pull 0 acc
-  in
-  Jsont.Array.array (Jsont.Array.map ~enc:{ Jsont.Array.enc } hash_entry_jsont)
-
-(* Decodes by pushing each entry to [yield] as it is parsed, building
-   nothing. *)
-let hashes_dec_jsont yield =
-  Jsont.Array.array
-    (Jsont.Array.map
-       ~dec_empty:(fun () -> ())
-       ~dec_add:(fun _ entry () -> yield entry)
-       ~dec_finish:(fun _ _ () -> ())
-       hash_entry_jsont)
-
-let write_hashes path hashes =
-  let oc = open_out_bin path in
-  Fun.protect
-    ~finally:(fun () -> close_out oc)
-    (fun () ->
-      let writer = Bytesrw.Bytes.Writer.of_out_channel oc in
-      match Jsont_bytesrw.encode hashes_enc_jsont hashes ~eod:true writer with
-      | Ok () -> ()
-      | Error msg -> failwith msg)
-
-let read_hashes path =
-  IStream.of_iter (fun yield ->
-      let ic = open_in_bin path in
-      Fun.protect
-        ~finally:(fun () -> close_in ic)
-        (fun () ->
-          let reader = Bytesrw.Bytes.Reader.of_in_channel ic in
-          match Jsont_bytesrw.decode (hashes_dec_jsont yield) reader with
-          | Ok () -> ()
-          | Error msg -> failwith msg))
+let write_hashes = Hashes.write_stream
+let read_hashes = Hashes.read_stream
 
 let hash_file ?(probes = false) ?fcqt ~merger ~params filename =
   let open_wav ?fcqt merger =
@@ -109,16 +57,16 @@ let hash_file ?(probes = false) ?fcqt ~merger ~params filename =
 
 let db_params_of_profile profile =
   {
-    Db.max_id_per_hash = profile.Profile_t.max_hash_id;
-    max_pos_per_hash = profile.Profile_t.max_hash_pos;
-    saturate = profile.Profile_t.saturate;
+    Db.max_id_per_hash = profile.Profile.max_hash_id;
+    max_pos_per_hash = profile.Profile.max_hash_pos;
+    saturate = profile.Profile.saturate;
   }
 
 type t = { ops : Db.operations; db_params : Db.params; db : Db.t }
 
 let open_db ~profile ~db_params path =
   let raw =
-    Lmdb_store.operations ~max_entries:profile.Profile_t.max_hash_entries path
+    Lmdb_store.operations ~max_entries:profile.Profile.max_hash_entries path
   in
   (* Write the profile to the database on the first put, matching
      [Args.lmdb_operations]. *)

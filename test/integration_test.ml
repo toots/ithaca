@@ -188,13 +188,13 @@ let cmd_test argv =
   (try
      let p = Lmdb_store.get_profile !c.db_path in
      let params =
-       if p.Profile_t.scheme = "quads" then
+       if p.Profile.scheme = "quads" then
          Printf.sprintf "quads-per-peak=%d, max-hash-entries=%d, reassign=%b"
-           p.Profile_t.quads_per_peak p.Profile_t.max_hash_entries
-           p.Profile_t.reassign
-       else Printf.sprintf "reassign=%b" p.Profile_t.reassign
+           p.Profile.quads_per_peak p.Profile.max_hash_entries
+           p.Profile.reassign
+       else Printf.sprintf "reassign=%b" p.Profile.reassign
      in
-     Printf.printf "Hashing scheme: %s (%s)\n%!" p.Profile_t.scheme params
+     Printf.printf "Hashing scheme: %s (%s)\n%!" p.Profile.scheme params
    with _ -> ());
   if !no_pitch then c := { !c with pitch_semitones = [||] };
   let entries = Manifest.read !c.db_path in

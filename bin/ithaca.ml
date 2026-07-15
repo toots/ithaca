@@ -163,10 +163,7 @@ let search_csv results =
       Printf.printf "%f, %f, %s, %f\n" start stop id pitch_semitones)
     results
 
-let search_json results =
-  let buf = Buffer.create 4096 in
-  Search_j.write_results buf results;
-  print_string (Buffer.contents buf)
+let search_json results = print_string (Search.to_string results)
 
 let search () =
   let wav = Wav.fopen !input_filename in
@@ -203,11 +200,9 @@ let search () =
 
 let consolidate () =
   let args = Args.anonymous_args () in
-  let matches = List.map Search_j.results_of_string args in
+  let matches = List.map Search.of_string args in
   let results = Search.consolidate (List.flatten matches) in
-  let buf = Buffer.create 4096 in
-  Search_j.write_results buf results;
-  print_string (Buffer.contents buf)
+  print_string (Search.to_string results)
 
 let check msg fn =
   if fn () then begin

@@ -209,3 +209,54 @@ let hashes ?(b1_divisor = 6) pairs =
         | None -> None
       in
       pull ()
+
+let entry_jsont =
+  Jsont.Object.map (fun pos hash bin -> { pos; hash; bin }) ~kind:"hash_entry"
+  |> Jsont.Object.mem "pos" Jsont.int ~enc:(fun e -> e.pos)
+  |> Jsont.Object.mem "hash" Jsont.int ~enc:(fun e -> e.hash)
+  |> Jsont.Object.mem "bin" Jsont.int ~enc:(fun e -> e.bin)
+  |> Jsont.Object.finish
+
+(* Encodes by folding over the stream, pulling one entry at a time. *)
+let stream_jsont_enc =
+  let enc fold acc stream =
+    let rec pull index acc =
+      match stream () with
+      | None -> acc
+      | Some entry -> pull (index + 1) (fold acc index entry)
+    in
+    pull 0 acc
+  in
+  Jsont.Array.array (Jsont.Array.map ~enc:{ Jsont.Array.enc } entry_jsont)
+
+(* Decodes by pushing each entry to [yield] as it is parsed, building
+   nothing: this lets the caller turn parsing itself into a pull stream via
+   [IStream.of_iter]. *)
+let stream_jsont_dec yield =
+  Jsont.Array.array
+    (Jsont.Array.map
+       ~dec_empty:(fun () -> ())
+       ~dec_add:(fun _ entry () -> yield entry)
+       ~dec_finish:(fun _ _ () -> ())
+       entry_jsont)
+
+let write_stream path hashes =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () ->
+      let writer = Bytesrw.Bytes.Writer.of_out_channel oc in
+      match Jsont_bytesrw.encode stream_jsont_enc hashes ~eod:true writer with
+      | Ok () -> ()
+      | Error msg -> failwith msg)
+
+let read_stream path =
+  IStream.of_iter (fun yield ->
+      let ic = open_in_bin path in
+      Fun.protect
+        ~finally:(fun () -> close_in ic)
+        (fun () ->
+          let reader = Bytesrw.Bytes.Reader.of_in_channel ic in
+          match Jsont_bytesrw.decode (stream_jsont_dec yield) reader with
+          | Ok () -> ()
+          | Error msg -> failwith msg))
