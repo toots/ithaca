@@ -31,6 +31,7 @@
 
 #define ITHACA_DB "db"
 #define ITHACA_SATURATED_DB "saturated"
+#define ITHACA_COUNTS_DB "counts"
 #define ITHACA_PROFILE "profile"
 #define ITHACA_PROFILE_KEY "profile"
 
@@ -89,7 +90,7 @@ CAMLprim value ocaml_lmdb_open(value file)
     raise_lmdb_error(rc);
 
   mdb_env_set_mapsize(env, map_size);
-  mdb_env_set_maxdbs(env, 3);
+  mdb_env_set_maxdbs(env, 4);
   mdb_env_set_maxreaders(env, 4096);
 
   rc = mdb_env_open(env, String_val(file), MDB_NOTLS | MDB_NOSUBDIR, 0755);
@@ -217,60 +218,41 @@ static int check_hash_saturation(MDB_txn *txn, MDB_dbi sdbi, uint32_t hash,
   return rc;
 }
 
-static int count_hash_ids(MDB_cursor *cursor, uint32_t hash, uint64_t *count)
+/* Per-hash running totals, one record per hash in ITHACA_COUNTS_DB:
+ * value_words[0] = total stored entries, value_words[1] = number of put
+ * calls (files) that stored this hash. Each put stores a file's entries
+ * for a hash under a single id, so the file count matches the distinct-id
+ * count that saturation is based on, without scanning the hash's entries. */
+static int update_hash_counts(MDB_txn *txn, MDB_dbi cdbi, uint32_t hash,
+                              uint64_t added_entries, uint64_t *n_entries,
+                              uint64_t *n_files)
 {
   MDB_val key, data;
-  uint64_t stored_key = ((uint64_t)hash) << 32;
-  uint16_t id_r, old_id_r = 0;
+  uint64_t value_words[2] = {0, 0};
   int rc;
 
-  *count = 0;
+  key.mv_size = sizeof(hash);
+  key.mv_data = &hash;
 
-  key.mv_size = sizeof(stored_key);
-  key.mv_data = &stored_key;
+  rc = mdb_get(txn, cdbi, &key, &data);
+  if (rc == 0 && data.mv_size == sizeof(value_words))
+    memcpy(value_words, data.mv_data, sizeof(value_words));
+  else if (rc != 0 && rc != MDB_NOTFOUND)
+    return rc;
 
-  rc = mdb_cursor_get(cursor, &key, &data, MDB_SET_RANGE);
+  value_words[0] += added_entries;
+  value_words[1] += 1;
+  *n_entries = value_words[0];
+  *n_files = value_words[1];
 
-  while (rc == 0) {
-    stored_key = *((uint64_t *)key.mv_data);
-    if ((uint32_t)(stored_key >> 32) != hash)
-      return 0;
-    id_r = stored_key >> 16;
-    if (*count == 0 || id_r != old_id_r)
-      (*count)++;
-    old_id_r = id_r;
-    rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
-  }
+  data.mv_size = sizeof(value_words);
+  data.mv_data = value_words;
 
-  return rc == MDB_NOTFOUND ? 0 : rc;
-}
-
-static int count_hash_entries(MDB_cursor *cursor, uint32_t hash,
-                              uint64_t *count)
-{
-  MDB_val key, data;
-  uint64_t stored_key = ((uint64_t)hash) << 32;
-  int rc;
-
-  *count = 0;
-
-  key.mv_size = sizeof(stored_key);
-  key.mv_data = &stored_key;
-
-  rc = mdb_cursor_get(cursor, &key, &data, MDB_SET_RANGE);
-
-  while (rc == 0) {
-    if ((uint32_t)(*((uint64_t *)key.mv_data) >> 32) != hash)
-      return 0;
-    (*count)++;
-    rc = mdb_cursor_get(cursor, &key, &data, MDB_NEXT);
-  }
-
-  return rc == MDB_NOTFOUND ? 0 : rc;
+  return mdb_put(txn, cdbi, &key, &data, 0);
 }
 
 static int mark_hash_as_saturated(MDB_cursor *cursor, MDB_txn *txn,
-                                  MDB_dbi sdbi, uint32_t hash)
+                                  MDB_dbi sdbi, MDB_dbi cdbi, uint32_t hash)
 {
   MDB_val key, data;
   uint64_t stored_key = ((uint64_t)hash) << 32;
@@ -294,6 +276,11 @@ static int mark_hash_as_saturated(MDB_cursor *cursor, MDB_txn *txn,
 
   key.mv_size = sizeof(hash);
   key.mv_data = &hash;
+
+  rc = mdb_del(txn, cdbi, &key, NULL);
+  if (rc != 0 && rc != MDB_NOTFOUND)
+    return rc;
+
   data.mv_size = sizeof(hash);
   data.mv_data = &hash;
 
@@ -308,7 +295,7 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _max_entries,
   MDB_txn *txn = NULL;
   MDB_cursor *cursor = NULL;
   MDB_env *env = Env_val(_env);
-  MDB_dbi dbi, sdbi;
+  MDB_dbi dbi, sdbi, cdbi;
   MDB_val key, data;
   uint64_t max = Long_val(_max);
   uint64_t max_entries = Long_val(_max_entries);
@@ -375,6 +362,8 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _max_entries,
   if (rc == 0)
     rc = mdb_dbi_open(txn, ITHACA_SATURATED_DB, db_flags, &sdbi);
   if (rc == 0)
+    rc = mdb_dbi_open(txn, ITHACA_COUNTS_DB, db_flags, &cdbi);
+  if (rc == 0)
     rc = mdb_cursor_open(txn, dbi, &cursor);
 
   pos = 0;
@@ -396,26 +385,20 @@ CAMLprim value ocaml_lmdb_put(value _env, value _max, value _max_entries,
       data.mv_data = value_words;
 
       rc = mdb_cursor_put(cursor, &key, &data, 0);
+    }
 
-      /* A hash present in too many distinct tracks, or holding too many
-       * entries overall, is non-discriminative: drop all its entries and
-       * mark it dead so it is never stored or looked up again. */
-      if (rc == 0 && 0 < max) {
-        uint64_t id_count;
-        rc = count_hash_ids(cursor, hashes[l], &id_count);
-        if (rc == 0 && max <= id_count) {
-          rc = mark_hash_as_saturated(cursor, txn, sdbi, hashes[l]);
-          break;
-        }
-      }
-      if (rc == 0 && 0 < max_entries) {
-        uint64_t entry_count;
-        rc = count_hash_entries(cursor, hashes[l], &entry_count);
-        if (rc == 0 && max_entries <= entry_count) {
-          rc = mark_hash_as_saturated(cursor, txn, sdbi, hashes[l]);
-          break;
-        }
-      }
+    /* A hash present in too many distinct tracks, or holding too many
+     * entries overall, is non-discriminative: drop all its entries and
+     * mark it dead so it is never stored or looked up again. The running
+     * totals live in ITHACA_COUNTS_DB so this is O(1) per hash instead of
+     * a scan of the hash's stored entries. */
+    if (rc == 0 && (0 < max || 0 < max_entries)) {
+      uint64_t n_entries, n_files;
+      rc = update_hash_counts(txn, cdbi, hashes[l], counts[l], &n_entries,
+                              &n_files);
+      if (rc == 0 && ((0 < max && max <= n_files) ||
+                      (0 < max_entries && max_entries <= n_entries)))
+        rc = mark_hash_as_saturated(cursor, txn, sdbi, cdbi, hashes[l]);
     }
     pos += counts[l];
   }
