@@ -115,6 +115,16 @@ let run ?(interrupted = fun () -> false) config =
         (Stats.human_bytes db)
         (Stats.bytes_per_second db audio)
     in
+    let refresh_header () =
+      let audio =
+        Mutex.lock stats_mutex;
+        let a = !total_audio in
+        Mutex.unlock stats_mutex;
+        a
+      in
+      Progress.update_header prog
+        (render_header ~done_:(Atomic.get n_done) ~audio ~itime:(elapsed ()))
+    in
 
     (* One of [n_hashers] workers: decode and hash a file in-process (reusing
        its dedicated processor) and enqueue the hashes. *)
@@ -183,7 +193,8 @@ let run ?(interrupted = fun () -> false) config =
       ignore (Atomic.fetch_and_add live_hashers (-1));
       Mutex.lock q_mutex;
       Condition.broadcast q_cond;
-      Mutex.unlock q_mutex
+      Mutex.unlock q_mutex;
+      refresh_header ()
     in
 
     (* Sole store worker: drain the queue and insert batches through one open
@@ -225,15 +236,7 @@ let run ?(interrupted = fun () -> false) config =
                 total_audio := !total_audio +. r.dur;
                 Mutex.unlock stats_mutex)
               batch;
-            let audio =
-              Mutex.lock stats_mutex;
-              let a = !total_audio in
-              Mutex.unlock stats_mutex;
-              a
-            in
-            Progress.update_header prog
-              (render_header ~done_:(Atomic.get n_done) ~audio
-                 ~itime:(elapsed ()));
+            refresh_header ();
             loop ()
       in
       loop ()
