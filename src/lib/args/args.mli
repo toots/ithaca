@@ -17,9 +17,6 @@
 
 type arg = Arg.key * Arg.spec * Arg.doc
 
-val quads_max_hash_entries : int
-(** Default [-max-hash-entries] value applied to the quads scheme. *)
-
 val parse :
   ?allow_anon:bool ->
   args:(Arg.key * Arg.spec * Arg.doc) list ->
@@ -32,7 +29,6 @@ val b1_divisor_arg : arg
 val reassign_arg : arg
 val scheme_arg : arg
 val quads_per_peak_arg : arg
-val max_hash_entries_arg : arg
 val whitening_time_arg : arg
 
 (* Programmatic equivalents of the CLI flags above, for callers that configure
@@ -42,7 +38,6 @@ val set_b1_divisor : int -> unit
 val set_reassign : unit -> unit
 val set_scheme : string -> unit
 val set_quads_per_peak : int -> unit
-val set_max_hash_entries : int -> unit
 val base64_profile : unit -> string
 val set_base64_profile : string -> unit
 val json_profile : unit -> string

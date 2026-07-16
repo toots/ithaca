@@ -25,7 +25,6 @@ type config = {
   reassign : bool;
   scheme : string option;
   quads_per_peak : int option;
-  max_hash_entries : int option;
   jobs : int; (* 0 = auto *)
 }
 
@@ -65,14 +64,11 @@ let run ?(interrupted = fun () -> false) config =
       "Indexing %d files (%d hashing workers + 1 store worker)...\n%!" n_files
       n_hashers;
 
-    (* Configure the hashing profile from [config] exactly as the CLI flags do
-       (order matters: -scheme sets the quads default max_hash_entries, which an
-       explicit -max-hash-entries then overrides). *)
+    (* Configure the hashing profile from [config] exactly as the CLI flags do. *)
     Option.iter Args.set_b1_divisor config.b1_divisor;
     if config.reassign then Args.set_reassign ();
     Option.iter Args.set_scheme config.scheme;
     Option.iter Args.set_quads_per_peak config.quads_per_peak;
-    Option.iter Args.set_max_hash_entries config.max_hash_entries;
     let params = Args.audio_params () in
     let merger = Args.merger () in
 
@@ -202,9 +198,12 @@ let run ?(interrupted = fun () -> false) config =
        it is the one that sees the database grow. *)
     let store_idx = n_hashers in
     let db =
-      Store.open_db ~profile:(Args.get_profile ())
+      Store.open_db ~nosync:true ~profile:(Args.get_profile ())
         ~db_params:(Args.db_params ()) config.db_path
     in
+    (* Bulk indexing opens the env with MDB_NOSYNC for throughput; flush once
+       when the run ends. [at_exit] also covers the SIGINT handler's [exit]. *)
+    at_exit (fun () -> Store.sync db);
     let store_worker () =
       let rec loop () =
         Mutex.lock q_mutex;

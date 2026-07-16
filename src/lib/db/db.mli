@@ -29,19 +29,12 @@ type data = {
 }
 
 type values = data list
-type max_id = int
 type match_entry = { id : int; pos : int; bin : int }
-
-type params = {
-  max_id_per_hash : uint16;
-  max_pos_per_hash : uint16;
-  saturate : bool;
-}
-
+type params = { max_id_per_hash : uint16; max_pos_per_hash : uint16 }
 type stored_hashes = (hash * values) list
 
 type operations = {
-  put : max_id -> stored_hashes -> unit;
+  put : stored_hashes -> unit;
   get : hash list -> values list;
 }
 

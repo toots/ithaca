@@ -29,7 +29,6 @@ type t = {
   reassign : bool;
   scheme : string;
   quads_per_peak : int;
-  max_hash_entries : int;
   delta_x : float;
   delta_y : int;
   max_x : float;
@@ -37,7 +36,6 @@ type t = {
   merger : string;
   max_hash_id : int;
   max_hash_pos : int;
-  saturate : bool;
   search_frame_length : float;
   search_frame_step : float;
   search_buffer_size : int;

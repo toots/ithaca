@@ -29,19 +29,12 @@ type data = {
 }
 
 type values = data list
-type max_id = int
 type match_entry = { id : int; pos : int; bin : int }
-
-type params = {
-  max_id_per_hash : uint16;
-  max_pos_per_hash : uint16;
-  saturate : bool;
-}
-
+type params = { max_id_per_hash : uint16; max_pos_per_hash : uint16 }
 type stored_hashes = (hash * values) list
 
 type operations = {
-  put : max_id -> stored_hashes -> unit;
+  put : stored_hashes -> unit;
   get : hash list -> values list;
 }
 
@@ -54,7 +47,7 @@ type t = {
 
 module Set = Set.Make (Int)
 
-let make { saturate; max_id_per_hash; max_pos_per_hash } { put; get } =
+let make { max_id_per_hash; max_pos_per_hash } { put; get } =
   let insert l =
     let hashes =
       List.fold_left
@@ -82,8 +75,7 @@ let make { saturate; max_id_per_hash; max_pos_per_hash } { put; get } =
           hashes @ cur)
         [] l
     in
-    let max_id = if saturate then max_id_per_hash else 0 in
-    put max_id hashes
+    put hashes
   in
 
   let search hashes =

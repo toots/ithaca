@@ -24,7 +24,6 @@ type t = {
   reassign : bool;
   scheme : string;
   quads_per_peak : int;
-  max_hash_entries : int;
   delta_x : float;
   delta_y : int;
   max_x : float;
@@ -32,7 +31,6 @@ type t = {
   merger : string;
   max_hash_id : int;
   max_hash_pos : int;
-  saturate : bool;
   search_frame_length : float;
   search_frame_step : float;
   search_buffer_size : int;
@@ -51,7 +49,6 @@ let jsont =
       reassign
       scheme
       quads_per_peak
-      max_hash_entries
       delta_x
       delta_y
       max_x
@@ -59,7 +56,6 @@ let jsont =
       merger
       max_hash_id
       max_hash_pos
-      saturate
       search_frame_length
       search_frame_step
       search_buffer_size
@@ -75,7 +71,6 @@ let jsont =
         reassign;
         scheme;
         quads_per_peak;
-        max_hash_entries;
         delta_x;
         delta_y;
         max_x;
@@ -83,7 +78,6 @@ let jsont =
         merger;
         max_hash_id;
         max_hash_pos;
-        saturate;
         search_frame_length;
         search_frame_step;
         search_buffer_size;
@@ -101,8 +95,6 @@ let jsont =
       p.scheme)
   |> Jsont.Object.mem "quads_per_peak" Jsont.int ~dec_absent:6 ~enc:(fun p ->
       p.quads_per_peak)
-  |> Jsont.Object.mem "max_hash_entries" Jsont.int ~dec_absent:0 ~enc:(fun p ->
-      p.max_hash_entries)
   |> Jsont.Object.mem "delta_x" Jsont.number ~enc:(fun p -> p.delta_x)
   |> Jsont.Object.mem "delta_y" Jsont.int ~enc:(fun p -> p.delta_y)
   |> Jsont.Object.mem "max_x" Jsont.number ~enc:(fun p -> p.max_x)
@@ -110,7 +102,6 @@ let jsont =
   |> Jsont.Object.mem "merger" Jsont.string ~enc:(fun p -> p.merger)
   |> Jsont.Object.mem "max_hash_id" Jsont.int ~enc:(fun p -> p.max_hash_id)
   |> Jsont.Object.mem "max_hash_pos" Jsont.int ~enc:(fun p -> p.max_hash_pos)
-  |> Jsont.Object.mem "saturate" Jsont.bool ~enc:(fun p -> p.saturate)
   |> Jsont.Object.mem "search_frame_length" Jsont.number ~dec_absent:0.
        ~enc:(fun p -> p.search_frame_length)
   |> Jsont.Object.mem "search_frame_step" Jsont.number ~dec_absent:0.

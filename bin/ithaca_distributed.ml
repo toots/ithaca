@@ -79,11 +79,7 @@ let args =
        \"finalize\". Default: \"enqueue\"" );
   ]
   @ [
-      Args.profile_arg;
-      Args.scheme_arg;
-      Args.quads_per_peak_arg;
-      Args.max_hash_entries_arg;
-      Args.store_arg;
+      Args.profile_arg; Args.scheme_arg; Args.quads_per_peak_arg; Args.store_arg;
     ]
 
 let search_params () = { (Args.search_params ()) with Search.debug = !debug }

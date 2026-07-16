@@ -21,7 +21,12 @@ exception Error of int
 val put_profile : string -> Profile.t -> unit
 val get_profile : string -> Profile.t
 
-(* [max_entries] bounds how many entries any single hash may hold: a hash
-   reaching it is dropped at store time and skipped at search time
-   (0 disables the limit). *)
-val operations : ?max_entries:int -> string -> Db.operations
+(* Open (and cache) the environment for [path] up front. [nosync] (defering
+   fsync to an explicit [sync]) is fixed at open time, so a caller that wants
+   it must call this before any other operation opens the env. *)
+val open_env : ?nosync:bool -> string -> unit
+
+(* Flush the environment to disk. Only meaningful for an env opened with
+   [~nosync:true], which otherwise never fsyncs. *)
+val sync : string -> unit
+val operations : string -> Db.operations

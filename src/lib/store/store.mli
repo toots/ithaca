@@ -49,11 +49,18 @@ type t
     environment stays open across every [store]/[put_stored] call. *)
 
 val db_params_of_profile : Profile.t -> Db.params
-val open_db : profile:Profile.t -> db_params:Db.params -> string -> t
+
+val open_db :
+  ?nosync:bool -> profile:Profile.t -> db_params:Db.params -> string -> t
+(** Open a database for writing. [nosync] defers fsync (see [sync]); it is only
+    honored on the first open of a given path, since the LMDB environment is
+    cached and its flags fixed at open time. *)
 
 val store : t -> (int * Hashes.t) list -> unit
 (** Store raw hash streams (a list is one write transaction). *)
 
 val put_stored : t -> Db.stored_hashes -> unit
-(** Store already-packed hashes (e.g. decoded from JSON), applying the profile's
-    saturation cap. *)
+(** Store already-packed hashes (e.g. decoded from JSON). *)
+
+val sync : t -> unit
+(** Flush the database to disk. A no-op unless opened with [~nosync:true]. *)

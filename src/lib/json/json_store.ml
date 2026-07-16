@@ -57,7 +57,7 @@ let to_string file =
   | Ok s -> s
   | Error msg -> failwith msg
 
-let put _ hashes =
+let put hashes =
   print_string (to_string { profile = Args.base64_profile (); hashes })
 
 let operations = { Db.put; get = (fun _ -> failwith "Not implemented!") }

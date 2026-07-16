@@ -1,9 +1,7 @@
 open OUnit2
 
 let make_db tmpfile =
-  let params =
-    { Db.max_id_per_hash = 1024; max_pos_per_hash = 50; saturate = true }
-  in
+  let params = { Db.max_id_per_hash = 1024; max_pos_per_hash = 50 } in
   Db.make params (Lmdb_store.operations tmpfile)
 
 let get_db ctx =

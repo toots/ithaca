@@ -38,7 +38,6 @@ let profile =
       reassign = Audio.default_params.Audio.hashes_reassign;
       scheme = "pairs";
       quads_per_peak = Audio.default_params.Audio.hashes_quads_per_peak;
-      max_hash_entries = 0;
       delta_x = Audio.default_params.Audio.peaks_delta_x;
       delta_y = Audio.default_params.Audio.peaks_delta_y;
       max_x = Audio.default_params.Audio.pairs_max_x;
@@ -46,7 +45,6 @@ let profile =
       merger = "both";
       max_hash_id = 512;
       max_hash_pos = 25;
-      saturate = true;
       search_frame_length = Search.default_params.Search.frame_length;
       search_frame_step = Search.default_params.Search.frame_step;
       search_buffer_size = Search.default_params.Search.buffer_size;
@@ -132,19 +130,13 @@ let scheme_of_string = function
    frame per alignment). *)
 let quads_search_threshold = 4
 
-(* Quads share a small geometric hash space, so a common geometry accretes
-   entries across many tracks. Past this many, a hash is non-discriminative:
-   it is dropped at store time and skipped at search time. *)
-let quads_max_hash_entries = 256
-
 let set_scheme s =
-  let search_threshold, max_hash_entries =
+  let search_threshold =
     match scheme_of_string s with
-    | Audio.Quads -> (quads_search_threshold, quads_max_hash_entries)
-    | Audio.Pairs -> (!profile.Profile.search_threshold, 0)
+    | Audio.Quads -> quads_search_threshold
+    | Audio.Pairs -> !profile.Profile.search_threshold
   in
-  profile :=
-    { !profile with Profile.scheme = s; search_threshold; max_hash_entries }
+  profile := { !profile with Profile.scheme = s; search_threshold }
 
 let scheme_arg =
   ( "-scheme",
@@ -153,11 +145,9 @@ let scheme_arg =
      \"quads\" (peak quads, Sonnleitner & Widmer 2016, robust to larger pitch \
      shifts). Default: \"pairs\"." )
 
-(* Database-size levers for the quads scheme. [-quads-per-peak] is the
-   primary control (linear in database size and search cost); lowering it
-   trades some pitch-shift recall margin for a smaller, faster database.
-   [-max-hash-entries] caps entries per hash, dropping over-common
-   geometries; it mainly bites at large corpora. *)
+(* Database-size lever for the quads scheme: [-quads-per-peak] is the primary
+   control (linear in database size and search cost); lowering it trades some
+   pitch-shift recall margin for a smaller, faster database. *)
 let set_quads_per_peak n =
   profile := { !profile with Profile.quads_per_peak = n }
 
@@ -169,18 +159,6 @@ let quads_per_peak_arg =
        on database size and search cost; lower it for a smaller database at \
        some recall cost."
       Quads.default_quads_per_peak )
-
-let set_max_hash_entries n =
-  profile := { !profile with Profile.max_hash_entries = n }
-
-let max_hash_entries_arg =
-  ( "-max-hash-entries",
-    Arg.Int set_max_hash_entries,
-    Printf.sprintf
-      "Drop any hash accumulating more than this many entries as \
-       non-discriminative (0 = no limit; default for quads: %d). Bounds \
-       database size and search cost at scale."
-      quads_max_hash_entries )
 
 let whitening_time_arg =
   ( "-whitening-time",
@@ -254,16 +232,14 @@ let audio_params () =
 let merger () : Audio.merger_mode = merger_of_string !profile.merger
 
 let lmdb_operations () =
-  let ops =
-    Lmdb_store.operations ~max_entries:!profile.max_hash_entries !lmdb_path
-  in
+  let ops = Lmdb_store.operations !lmdb_path in
   let first = ref true in
-  let put max values =
+  let put values =
     if !first then begin
       Lmdb_store.put_profile !lmdb_path !profile;
       first := false
     end;
-    ops.Db.put max values
+    ops.Db.put values
   in
   { ops with Db.put }
 
@@ -271,7 +247,6 @@ let db_params () =
   {
     Db.max_id_per_hash = !profile.max_hash_id;
     max_pos_per_hash = !profile.max_hash_pos;
-    saturate = !profile.saturate;
   }
 
 let search_params () =

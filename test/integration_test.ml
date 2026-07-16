@@ -18,7 +18,6 @@ let cmd_index argv =
         reassign = false;
         scheme = None;
         quads_per_peak = None;
-        max_hash_entries = None;
         jobs = 0;
       }
   in
@@ -57,12 +56,6 @@ let cmd_index argv =
           "N  Quads scheme: max quads per peak (lower = smaller/faster DB; \
            default: %d)"
           Quads.default_quads_per_peak );
-      ( "--max-hash-entries",
-        Arg.Int (fun n -> c := { !c with max_hash_entries = Some n }),
-        Printf.sprintf
-          "N  Drop hashes exceeding this many entries (0 = no limit; default \
-           for quads: %d)"
-          Args.quads_max_hash_entries );
       ( "--jobs",
         Arg.Int (fun n -> c := { !c with jobs = n }),
         Printf.sprintf "N  Parallel jobs (default: %d)"
@@ -93,9 +86,6 @@ let cmd_index argv =
            Printf.sprintf "quads-per-peak=%d"
              (Option.value ~default:Quads.default_quads_per_peak
                 !c.quads_per_peak);
-           Printf.sprintf "max-hash-entries=%d"
-             (Option.value ~default:Args.quads_max_hash_entries
-                !c.max_hash_entries);
          ]
        else [])
     @ [ Printf.sprintf "reassign=%b" !c.reassign ]
@@ -189,9 +179,8 @@ let cmd_test argv =
      let p = Lmdb_store.get_profile !c.db_path in
      let params =
        if p.Profile.scheme = "quads" then
-         Printf.sprintf "quads-per-peak=%d, max-hash-entries=%d, reassign=%b"
-           p.Profile.quads_per_peak p.Profile.max_hash_entries
-           p.Profile.reassign
+         Printf.sprintf "quads-per-peak=%d, reassign=%b"
+           p.Profile.quads_per_peak p.Profile.reassign
        else Printf.sprintf "reassign=%b" p.Profile.reassign
      in
      Printf.printf "Hashing scheme: %s (%s)\n%!" p.Profile.scheme params

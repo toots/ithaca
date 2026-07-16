@@ -59,31 +59,34 @@ let db_params_of_profile profile =
   {
     Db.max_id_per_hash = profile.Profile.max_hash_id;
     max_pos_per_hash = profile.Profile.max_hash_pos;
-    saturate = profile.Profile.saturate;
   }
 
-type t = { ops : Db.operations; db_params : Db.params; db : Db.t }
+type t = {
+  ops : Db.operations;
+  db_params : Db.params;
+  db : Db.t;
+  sync : unit -> unit;
+}
 
-let open_db ~profile ~db_params path =
-  let raw =
-    Lmdb_store.operations ~max_entries:profile.Profile.max_hash_entries path
-  in
+let open_db ?(nosync = false) ~profile ~db_params path =
+  (* Open the env up front so the [nosync] flag takes effect before the first
+     profile write caches the env with the default. *)
+  Lmdb_store.open_env ~nosync path;
+  let raw = Lmdb_store.operations path in
   (* Write the profile to the database on the first put, matching
      [Args.lmdb_operations]. *)
   let first = ref true in
-  let put max values =
+  let put values =
     if !first then begin
       Lmdb_store.put_profile path profile;
       first := false
     end;
-    raw.Db.put max values
+    raw.Db.put values
   in
   let ops = { raw with Db.put } in
-  { ops; db_params; db = Db.make db_params ops }
+  let sync () = Lmdb_store.sync path in
+  { ops; db_params; db = Db.make db_params ops; sync }
 
 let store t l = t.db.Db.insert l
-
-let put_stored t stored =
-  let { Db.saturate; max_id_per_hash; _ } = t.db_params in
-  let max_id = if saturate then max_id_per_hash else 0 in
-  t.ops.Db.put max_id stored
+let put_stored t stored = t.ops.Db.put stored
+let sync t = t.sync ()

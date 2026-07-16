@@ -122,9 +122,7 @@ let () =
   benchmark_hashing ();
   Printf.printf "\n%!";
   wrap (fun tmpfile ->
-      let params =
-        { Db.max_id_per_hash = 1024; max_pos_per_hash = 50; saturate = true }
-      in
+      let params = { Db.max_id_per_hash = 1024; max_pos_per_hash = 50 } in
       let db = Db.make params (Lmdb_store.operations tmpfile) in
       benchmark_insert db;
       Printf.printf "\n%!";
